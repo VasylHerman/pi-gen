@@ -48,10 +48,12 @@ if [ -z "${IMG}" ]; then
 		exit 1
 	fi
 	echo "==> Extracting ${ARCHIVE}"
+	# Stream into a new file rather than `xz -dk`: deploy/ files are written by the build
+	# container as root, and copying their owner/group fails for a normal user on Linux.
 	case "${ARCHIVE}" in
 		*.zip) unzip -o -q "${ARCHIVE}" '*.img' -d "${DEPLOY}" ;;
-		*.xz) xz -dk "${ARCHIVE}" ;;
-		*.gz) gunzip -k "${ARCHIVE}" ;;
+		*.xz) xz -dc "${ARCHIVE}" > "${ARCHIVE%.xz}" ;;
+		*.gz) gzip -dc "${ARCHIVE}" > "${ARCHIVE%.gz}" ;;
 	esac
 	IMG=$(newest "${DEPLOY}"/*.img)
 fi

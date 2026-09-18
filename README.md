@@ -218,7 +218,10 @@ and then packages the result with the kernel's own `make bindeb-pkg`:
 
 1. obtains that output: `KERNEL_SOURCE=deb` downloads release `kernel-v<VERSION>` from
    `KERNEL_DEB_REPO` and verifies `SHA256SUMS`; `KERNEL_SOURCE=build` runs
-   `kernel/build-kernel.sh` on the spot. Both are cached in the work volume;
+   `kernel/build-kernel.sh` on the spot. Both are cached in the work volume. The download
+   uses the public release URL, or the GitHub API when `GITHUB_TOKEN` is set, which is
+   what a private repository needs; CI passes its token, and locally the engine picks up
+   `gh auth token` when the gh CLI is logged in;
 2. installs the package in the chroot with `apt-get install`;
 3. copies `/boot/vmlinuz-<release>` to `/boot/firmware/kernel8-demo.img`, the
    `bcm2711*.dtb` and `overlays/*.dtbo` from `/usr/lib/linux-image-<release>/` into
@@ -342,7 +345,20 @@ Upstream pi-gen variables are documented in `pi-gen/README.md`. Our additions:
 
 Wrapper environment (`scripts/build-image.sh`, `build-kernel.sh`): `CLEAN=1`,
 `CONTAINER_NAME`, `WORK_VOLUME` (volume name or host path), `IMG_NAME`, `PI_GEN_RELEASE`,
-`KERNEL_SOURCE`, `KERNEL_UPDATE`, `DOCKER_PLATFORM`, `PIGEN_DOCKER_OPTS`, `DOCKER`.
+`KERNEL_SOURCE`, `KERNEL_UPDATE`, `GITHUB_TOKEN` (private repositories), `DOCKER_PLATFORM`,
+`PIGEN_DOCKER_OPTS`, `DOCKER`.
+
+### Private repository
+
+Everything works with one change of runner. Releases and artifacts behave the same;
+`stage-kernel` downloads the kernel package through the authenticated API when
+`GITHUB_TOKEN` is set (CI does this, locally `gh auth login` is enough), and
+`KERNEL_SOURCE=build` never touches GitHub at all. What does not carry over is
+`runs-on: ubuntu-24.04-arm`: GitHub's arm64 hosted runners are free only for public
+repositories. Options are `ubuntu-latest` (x86-64; the Dockerfile and engine already
+handle it with `qemu-user-static` and a cross compiler, kernel builds stay at ~25 min,
+image builds slow to 30 to 40 min because the arm64 chroot runs emulated) or a
+self-hosted arm64 runner (`runs-on: [self-hosted, ARM64]`).
 
 ## Building without Docker
 

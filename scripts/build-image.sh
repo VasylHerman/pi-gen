@@ -16,6 +16,8 @@
 #                         volume name, or an absolute host path (used by CI to pick a disk)
 #   IMG_NAME, PI_GEN_RELEASE, KERNEL_SOURCE, KERNEL_UPDATE
 #                         passed through to pi-gen; the config falls back to its defaults
+#   GITHUB_TOKEN          forwarded for KERNEL_SOURCE=deb downloads from a private
+#                         repository; defaults to `gh auth token` when gh is logged in
 #   DOCKER_PLATFORM, DOCKER, IMAGE_TAG   see scripts/docker-env.sh
 #   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
 #
@@ -63,6 +65,13 @@ esac
 
 env_assert_not_running "${CONTAINER_NAME}"
 mkdir -p "${ROOT}/deploy"
+
+# KERNEL_SOURCE=deb downloads a GitHub release; for a private repository that needs a
+# token. Use the gh CLI's login when the developer has one and nothing is set.
+if [ -z "${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+	GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
+fi
+
 env_build_image
 
 # shellcheck disable=SC2086
@@ -77,6 +86,7 @@ run_container() {
 		-e "PI_GEN_RELEASE=${PI_GEN_RELEASE:-}" \
 		-e "KERNEL_SOURCE=${KERNEL_SOURCE:-}" \
 		-e "KERNEL_UPDATE=${KERNEL_UPDATE:-}" \
+		-e "GITHUB_TOKEN=${GITHUB_TOKEN:-}" \
 		-e "PIGEN_CONFIG=${CONFIG_IN_CONTAINER}" \
 		${PIGEN_DOCKER_OPTS} \
 		"$@"
