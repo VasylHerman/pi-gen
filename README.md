@@ -52,7 +52,7 @@ stage is exported.
 Clone with the submodule:
 
 ```sh
-git clone --recurse-submodules <this repo>
+git clone --recurse-submodules https://github.com/VasylHerman/pi-gen-demo.git
 # or, in an existing checkout:
 git submodule update --init
 ```
