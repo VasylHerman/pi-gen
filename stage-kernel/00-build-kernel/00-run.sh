@@ -78,6 +78,17 @@ fi
 
 KERNEL_GIT_HASH=$(git -C "${KERNEL_SRC_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)
 
+# ---- reproducible build stamps --------------------------------------------------
+# `uname -v` embeds a build counter, date, user and host (scripts/mkcompile_h). Fix all
+# four so the same source revision and config produce a byte-identical kernel: counter
+# 1 instead of the object tree's .version, the commit date instead of wall-clock time,
+# neutral names instead of root@<container id>.
+export KBUILD_BUILD_VERSION=1
+export KBUILD_BUILD_TIMESTAMP
+KBUILD_BUILD_TIMESTAMP=$(git -C "${KERNEL_SRC_DIR}" log -1 --format=%cD 2>/dev/null || date -u -R)
+export KBUILD_BUILD_USER=pi-gen-demo
+export KBUILD_BUILD_HOST=build
+
 # ---- configure ----------------------------------------------------------------
 log "Configuring kernel: ${KERNEL_DEFCONFIG} + $(basename "${FRAGMENT}")"
 kmake "${KERNEL_DEFCONFIG}"

@@ -182,6 +182,27 @@ adds virtio block/net plus the generic PCI host so the kernel also boots under Q
 Add your own options there; the post-`olddefconfig` check tells you if Kconfig refused
 one.
 
+### Kernel versioning
+
+* **Source revision.** `KERNEL_COMMIT` in `config/common.conf` pins the exact
+  `raspberrypi/linux` commit; releases never build from a moving branch tip. To move:
+  set `KERNEL_UPDATE=1` for one build, read the new hash from the `Built kernel ... from`
+  line in `build.log`, pin it, and mention the Linux version in the comment next to it.
+  The hash is recorded in `/etc/demo-kernel` and shown on the demo page.
+* **Version string.** `uname -r` is `<upstream version><LOCALVERSION>`, e.g.
+  `6.12.110-v8-demo`: upstream stable version, the Raspberry Pi `-v8` flavour, and
+  `-demo` for "this configuration". Keep it independent of the image tag. If the
+  fragment changes without the source moving, append a revision (`-v8-demo.2`) so the
+  module directories stay distinct.
+* **Reproducible.** `stage-kernel` fixes `KBUILD_BUILD_VERSION`, `KBUILD_BUILD_TIMESTAMP`
+  (the commit date), `KBUILD_BUILD_USER` and `KBUILD_BUILD_HOST`, so `uname -v` reads
+  `#1 SMP PREEMPT <commit date>` and two builds of the same commit and fragment produce
+  the same `Image`. The toolchain is Debian Bookworm's gcc 12 from the build container.
+* **With a fork.** Once you carry code patches, fork `raspberrypi/linux`, tag it
+  `v6.12.110-demo.1` (upstream version, your suffix, your revision), and set
+  `KERNEL_GIT_URL` to the fork and `KERNEL_BRANCH` to the tag (`git clone --branch`
+  accepts tags). The tag and `uname -r` then share the same digits.
+
 Design notes:
 
 * In the dev image the stock `linux-image-rpi-v8` package stays installed. To boot it
@@ -248,7 +269,7 @@ in `pi-gen/README.md`. Our additions, all in `common.conf` unless noted:
 | `RELEASE_SLIM` | `0` / `1` (variant file) | run stage-slim |
 | `KERNEL_GIT_URL` | `https://github.com/raspberrypi/linux.git` | kernel source |
 | `KERNEL_BRANCH` | `rpi-6.12.y` | branch to shallow-clone |
-| `KERNEL_COMMIT` | empty | pin an exact commit |
+| `KERNEL_COMMIT` | `9c40c75f…` (6.12.110) | exact commit to build; empty = branch tip |
 | `KERNEL_DEFCONFIG` | `bcm2711_defconfig` | base config (Pi 4 family, 64-bit) |
 | `KERNEL_IMG_NAME` | `kernel8-demo.img` | file name under `/boot/firmware` and `kernel=` value |
 | `KERNEL_SRC_DIR` | `${BASE_DIR}/work/kernel/linux` | source/object tree, inside the work volume |
