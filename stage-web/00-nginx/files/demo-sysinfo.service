@@ -1,0 +1,14 @@
+[Unit]
+Description=Demo: publish live kernel/system facts to /var/www/html/sysinfo.json
+After=local-fs.target
+Before=nginx.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/demo-sysinfo
+Restart=always
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

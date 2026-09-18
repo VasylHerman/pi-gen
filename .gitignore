@@ -1,0 +1,8 @@
+deploy/
+work/
+.idea/
+*.img
+*.img.zip
+*.img.gz
+*.img.xz
+.docker-build.log

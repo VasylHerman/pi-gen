@@ -1,0 +1,65 @@
+#!/bin/bash
+# Publish live system facts as JSON for the demo page (polled by index.html).
+# Runs as demo-sysinfo.service; rewrites /var/www/html/sysinfo.json atomically.
+set -u
+
+OUT=${OUT:-/var/www/html/sysinfo.json}
+INTERVAL=${INTERVAL:-5}
+
+KERNEL_RELEASE=""
+KERNEL_IMAGE=""
+if [ -r /etc/demo-kernel ]; then
+	# shellcheck disable=SC1091
+	. /etc/demo-kernel
+fi
+
+json_str() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+while :; do
+	read -r uptime _ < /proc/uptime
+	read -r load1 load5 load15 _ < /proc/loadavg
+	mem_total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+	mem_avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+
+	temp=null
+	if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+		temp=$(awk '{printf "%.1f", $1 / 1000}' /sys/class/thermal/thermal_zone0/temp)
+	fi
+	model=""
+	if [ -r /proc/device-tree/model ]; then
+		model=$(tr -d '\0' < /proc/device-tree/model)
+	fi
+	ips=$(hostname -I 2>/dev/null | tr -s ' ' | sed 's/ *$//')
+
+	proc_config=false
+	[ -e /proc/config.gz ] && proc_config=true
+	running_custom=false
+	[ -n "${KERNEL_RELEASE}" ] && [ "$(uname -r)" = "${KERNEL_RELEASE}" ] && running_custom=true
+
+	tmp=$(mktemp "${OUT}.XXXXXX")
+	cat > "${tmp}" <<EOF
+{
+  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "hostname": "$(json_str "$(hostname)")",
+  "model": "$(json_str "${model}")",
+  "kernel_release": "$(json_str "$(uname -r)")",
+  "kernel_version": "$(json_str "$(uname -v)")",
+  "machine": "$(uname -m)",
+  "expected_kernel_release": "$(json_str "${KERNEL_RELEASE}")",
+  "kernel_image": "$(json_str "${KERNEL_IMAGE}")",
+  "running_custom_kernel": ${running_custom},
+  "proc_config_gz": ${proc_config},
+  "uptime_seconds": ${uptime%.*},
+  "load": [${load1}, ${load5}, ${load15}],
+  "mem_total_kb": ${mem_total:-0},
+  "mem_available_kb": ${mem_avail:-0},
+  "cpu_temp_c": ${temp},
+  "ip_addresses": "$(json_str "${ips}")"
+}
+EOF
+	chmod 644 "${tmp}"
+	mv -f "${tmp}" "${OUT}"
+	sleep "${INTERVAL}"
+done

@@ -1,0 +1,40 @@
+# pi-gen configuration for the Raspberry Pi 4 custom-kernel demo image.
+#
+# Sourced by pi-gen/build.sh (./build.sh passes it as `-c /build/config`), so this is
+# bash syntax. ${BASE_DIR} is the pi-gen checkout. Variables consumed by our own stage
+# scripts must be exported: pi-gen runs each *-run.sh as a child process.
+# Reference for the upstream variables: pi-gen/README.md, section "Config".
+
+IMG_NAME="pi4-demo"
+PI_GEN_RELEASE="Raspberry Pi 4 custom kernel demo"
+RELEASE="bookworm"
+
+TARGET_HOSTNAME="pi-demo"        # reachable as http://pi-demo.local/ via avahi
+LOCALE_DEFAULT="en_US.UTF-8"
+KEYBOARD_KEYMAP="us"
+KEYBOARD_LAYOUT="English (US)"
+TIMEZONE_DEFAULT="UTC"
+
+# DEMO ONLY: fixed user/password and SSH enabled so the board can be reached right
+# after flashing. Do not ship an image like this.
+ENABLE_SSH=1
+FIRST_USER_NAME="pi"
+FIRST_USER_PASS="raspberry"
+DISABLE_FIRST_BOOT_USER_RENAME=1
+
+DEPLOY_COMPRESSION="zip"         # none | zip | gz | xz
+
+# Upstream Lite stages (bootstrap, minimal, lite) followed by our two stages, which
+# live next to the pi-gen checkout. Order matters: stage-web bakes facts recorded by
+# stage-kernel into the page.
+STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2 ${BASE_DIR}/../stage-kernel ${BASE_DIR}/../stage-web"
+
+# ---- stage-kernel -------------------------------------------------------------
+export KERNEL_GIT_URL="https://github.com/raspberrypi/linux.git"
+export KERNEL_BRANCH="rpi-6.12.y"          # same series as Bookworm's linux-image-rpi-v8 (6.12.x)
+export KERNEL_COMMIT=""                    # optional: pin an exact commit for reproducible builds
+export KERNEL_DEFCONFIG="bcm2711_defconfig" # Pi 4 / 400 / CM4, 64-bit
+export KERNEL_IMG_NAME="kernel8-demo.img"  # installed next to the stock kernel8.img
+export KERNEL_SRC_DIR="${BASE_DIR}/work/kernel/linux"  # inside the cached work volume
+export KERNEL_UPDATE=0                     # 1 = re-fetch the branch tip on every build
+#export KERNEL_JOBS=8                      # default: nproc
