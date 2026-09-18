@@ -21,6 +21,7 @@ This is a demo project. The image ships a fixed user/password and SSH enabled; s
 ├── Dockerfile               Debian Bookworm + pi-gen deps + kernel toolchain
 ├── config                   pi-gen config (image name, user, STAGE_LIST, KERNEL_* knobs)
 ├── pi-gen/                  upstream pi-gen, git submodule, branch bookworm-arm64 (unmodified)
+├── run-qemu.sh              boots deploy/*.img in qemu-system-aarch64 (virt machine, HVF/KVM)
 ├── stage-kernel/            builds and installs the custom kernel
 │   └── 00-build-kernel/
 │       ├── 00-run.sh        clone → defconfig + fragment → build → install into rootfs
@@ -76,6 +77,27 @@ cat /etc/demo-kernel          # release, branch, commit, build date
 curl -s http://localhost/sysinfo.json
 ```
 
+### Running without a board (QEMU)
+
+```sh
+brew install qemu        # macOS; QEMU >= 8 with the arm64 system emulator
+./run-qemu.sh            # boots the newest deploy/*.img, console in this terminal
+```
+
+Then open <http://localhost:8080/> or `ssh -p 2222 pi@localhost`. Quit with `Ctrl-a x`.
+
+This uses the `virt` machine and the custom kernel (`deploy/kernel8-demo.img`, copied out
+by stage-kernel): the Kconfig fragment adds virtio disk/NIC drivers, so the very same
+kernel boots on the Pi and in QEMU, while the stock Debian kernel cannot boot here at
+all. On Apple Silicon the guest runs under HVF at near-native speed. By default the
+image is opened with `-snapshot`, so first-boot changes are discarded; use `SNAPSHOT=0`
+to persist them. In QEMU the page reports the model as `linux,dummy-virt` and no CPU
+temperature; everything else, including the `uname -r` check, is real.
+
+QEMU also ships a `raspi4b` machine that boots the kernel with the real
+`bcm2711-rpi-4-b.dtb`, but it emulates no Ethernet or USB, so it is only useful for
+watching the kernel come up on the serial console.
+
 ### Iterating
 
 All state lives in the Docker volume `pigen_demo_work`, so every run resumes where the
@@ -109,11 +131,13 @@ are ignored by its `.gitignore`; the ones in `stage-*` are not, so do not commit
 4. install into the stage rootfs: `modules_install` (stripped) under `/lib/modules/`,
    `Image` as `/boot/firmware/kernel8-demo.img`, `bcm2711*.dtb` and `overlays/` into
    `/boot/firmware/`, the `.config` under `/usr/share/doc/demo-kernel/`;
-5. append a `[pi4] kernel=kernel8-demo.img [all]` block to `config.txt` and write
-   `/etc/demo-kernel` with the release, commit and build date.
+5. append a `[pi4] kernel=kernel8-demo.img [all]` block to `config.txt`, write
+   `/etc/demo-kernel` with the release, commit and build date, and drop a copy of the
+   kernel into `deploy/` for `run-qemu.sh`.
 
 The fragment sets `CONFIG_LOCALVERSION="-v8-demo"` (so `uname -r` shows the build is
-custom) and enables `CONFIG_IKCONFIG_PROC` (so `/proc/config.gz` exists on the board).
+custom), enables `CONFIG_IKCONFIG_PROC` (so `/proc/config.gz` exists on the board) and
+adds virtio block/net plus the generic PCI host so the kernel also boots under QEMU.
 Add your own options there; the post-`olddefconfig` check tells you if Kconfig refused
 one.
 

@@ -14,6 +14,8 @@
 #   /boot/firmware/config.txt              [pi4] kernel=${KERNEL_IMG_NAME}
 #   /etc/demo-kernel                       KEY=VALUE facts, consumed by stage-web
 #   /usr/share/doc/demo-kernel/            the exact .config used
+# and, outside the image, a copy of the kernel in ${DEPLOY_DIR} so run-qemu.sh can boot
+# the exported image without mounting its FAT partition.
 #
 # The kernel is deliberately NOT registered as /boot/vmlinuz-<release>. That keeps
 # `update-initramfs -k all` (run by export-image, enumerates /boot/vmlinuz-*) and the
@@ -122,6 +124,9 @@ install -m 644 "${KERNEL_SRC_DIR}"/arch/arm64/boot/dts/broadcom/bcm2711*.dtb "${
 install -d -m 755 "${FIRMWARE_DIR}/overlays"
 install -m 644 "${KERNEL_SRC_DIR}"/arch/arm64/boot/dts/overlays/*.dtb* "${FIRMWARE_DIR}/overlays/"
 install -m 644 "${KERNEL_SRC_DIR}/arch/arm64/boot/dts/overlays/README" "${FIRMWARE_DIR}/overlays/"
+
+mkdir -p "${DEPLOY_DIR}"
+install -m 644 "${KERNEL_SRC_DIR}/arch/arm64/boot/Image" "${DEPLOY_DIR}/${KERNEL_IMG_NAME}"
 
 install -d -m 755 "${ROOTFS_DIR}/usr/share/doc/demo-kernel"
 install -m 644 "${KERNEL_SRC_DIR}/.config" "${ROOTFS_DIR}/usr/share/doc/demo-kernel/config-${KREL}"
