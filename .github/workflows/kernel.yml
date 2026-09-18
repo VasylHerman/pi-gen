@@ -1,21 +1,22 @@
 # Build the custom kernel as a Debian package whenever its inputs change, and publish it
-# as GitHub release "kernel-v<kernel/VERSION>" when that change lands on main.
+# as GitHub release "kernel-v<kernel/VERSION>" when the result is new.
 #
 #   pull request touching kernel/ ...  -> build, boot-test, upload artifact
-#   push to main touching kernel/ ...  -> the same, then create the release (tag included)
+#   push to main touching kernel/ ...  -> the same, then publish (see below)
 #   workflow_dispatch                  -> build + artifact only
 #
-# The version is explicit: bump kernel/VERSION ("<upstream>-demo.<N>") in the same PR
-# that changes the fragment or KERNEL_COMMIT. A push to main whose version is already
-# released fails here instead of publishing twice. Image builds consume the release
-# (config/release.conf, KERNEL_SOURCE=deb).
+# Publishing is decided by the reproducible kernel Image, not by the trigger:
+#   release kernel-v<VERSION> missing                  -> create it (tag included)
+#   release exists, its Image hash == the one built    -> nothing changed, skip quietly
+#   release exists, hash differs                       -> fail: bump kernel/VERSION
+# So a Dockerfile or workflow edit that does not change the kernel is harmless, and a
+# fragment or KERNEL_COMMIT change without a version bump cannot be published.
 name: kernel
 
 on:
   pull_request:
     paths:
       - 'kernel/**'
-      - 'config/common.conf'
       - 'Dockerfile'
       - 'build-kernel.sh'
       - 'scripts/docker-env.sh'
@@ -27,11 +28,11 @@ on:
     branches: [main]
     paths:
       - 'kernel/**'
-      - 'config/common.conf'
       - 'Dockerfile'
       - 'build-kernel.sh'
       - 'scripts/docker-env.sh'
       - '.github/workflows/kernel.yml'
+      - '.github/actions/**'
   workflow_dispatch:
 
 permissions:
@@ -52,18 +53,6 @@ jobs:
 
       - uses: ./.github/actions/prepare-runner
 
-      - name: Version must not already be released
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="kernel-v$(tr -d '[:space:]' < kernel/VERSION)"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::release $tag already exists; bump kernel/VERSION in the PR that changes the kernel"
-            exit 1
-          fi
-          echo "will publish $tag"
-
       - name: Build kernel package
         run: ./build-kernel.sh
 
@@ -77,6 +66,7 @@ jobs:
             echo "release=$KERNEL_RELEASE"
             echo "version=$KERNEL_VERSION"
             echo "deb=$KERNEL_DEB"
+            echo "image_sha256=$(sha256sum deploy/kernel8-demo.img | cut -d' ' -f1)"
           } >> "$GITHUB_OUTPUT"
           ls -la deploy
 
@@ -112,8 +102,32 @@ jobs:
             deploy/kernel-release.env
             deploy/SHA256SUMS
 
-      - name: Publish kernel release
+      - name: Decide whether to publish
+        id: decide
         if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag="kernel-v${{ steps.kernel.outputs.version }}"
+          built="${{ steps.kernel.outputs.image_sha256 }}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "$tag does not exist yet: publishing"
+            exit 0
+          fi
+          published=$(gh release download "$tag" --pattern SHA256SUMS --output - \
+                        | awk '$2 == "kernel8-demo.img" {print $1}')
+          if [ "$published" = "$built" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$tag already published with an identical kernel Image ($built); nothing to do"
+            exit 0
+          fi
+          echo "::error::$tag is already published with a different kernel Image (published $published, built $built). The kernel changed: bump kernel/VERSION in the PR that changes it."
+          exit 1
+
+      - name: Publish kernel release
+        if: github.event_name == 'push' && steps.decide.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -125,7 +139,7 @@ jobs:
             echo
             echo "- source: $KERNEL_GIT_URL branch $KERNEL_BRANCH, commit $KERNEL_COMMIT"
             echo "- config: $KERNEL_DEFCONFIG + kernel/demo.config (see \`config-$KERNEL_RELEASE\`)"
-            echo "- built by ${{ github.repository }}@${{ github.sha }}"
+            echo "- built by ${{ github.repository }}@${{ github.sha }}; the Image is reproducible (sha256 in SHA256SUMS)"
             echo
             echo "Install on a running device: \`sudo apt install ./$KERNEL_DEB\`, then copy"
             echo "\`/boot/vmlinuz-$KERNEL_RELEASE\` to \`/boot/firmware/kernel8-demo.img\` (stage-kernel does this in images)."
