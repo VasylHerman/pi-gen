@@ -77,6 +77,19 @@ env_run() {
 	${DOCKER} run --rm --privileged --platform "${DOCKER_PLATFORM}" "$@"
 }
 
+# Extra `docker run` options that hand a host ccache directory to the kernel build when
+# CCACHE_DIR is set (absolute path). CI persists that directory with actions/cache.
+# Unset: the build uses a directory inside the work volume. Output is meant to be
+# word-split by the caller.
+env_ccache_opts() {
+	if [ -n "${CCACHE_DIR:-}" ]; then
+		case "${CCACHE_DIR}" in
+			/*) mkdir -p "${CCACHE_DIR}"; echo "--volume ${CCACHE_DIR}:/ccache -e CCACHE_DIR=/ccache" ;;
+			*) echo "CCACHE_DIR must be an absolute path: ${CCACHE_DIR}" >&2; exit 1 ;;
+		esac
+	fi
+}
+
 # Seconds -> "N min M s"
 env_elapsed() {
 	echo "$(( $1 / 60 )) min $(( $1 % 60 )) s"

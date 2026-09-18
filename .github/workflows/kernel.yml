@@ -47,13 +47,28 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: true
 
       - uses: ./.github/actions/prepare-runner
 
+      - name: Restore compiler cache
+        # ccache turns the ~22 min from-scratch compile into a few minutes when only the
+        # fragment or the packaging changed. Entries are immutable, so every run saves
+        # under a new key and the next run restores the most recent one for the same
+        # kernel inputs (falling back to any arm64 cache).
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-kernel-${{ runner.arch }}-${{ hashFiles('kernel/**', 'Dockerfile') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-kernel-${{ runner.arch }}-${{ hashFiles('kernel/**', 'Dockerfile') }}-
+            ccache-kernel-${{ runner.arch }}-
+
       - name: Build kernel package
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
         run: ./build-kernel.sh
 
       - name: Read result
@@ -89,7 +104,7 @@ jobs:
           KERNEL=deploy/kernel8-demo.img scripts/qemu-smoke-test.sh smoke/image_* "${{ steps.kernel.outputs.release }}"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ steps.kernel.outputs.deb }}
           retention-days: 14

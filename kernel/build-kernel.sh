@@ -50,6 +50,25 @@ else
 	exit 1
 fi
 
+# ---- ccache -------------------------------------------------------------------
+# Compiler cache in front of gcc via the masquerade directory, so every make level
+# (including dpkg-buildpackage's) picks it up without CC= plumbing. Output is unaffected:
+# ccache replays the identical object files, so the Image hash stays reproducible.
+# CCACHE_DIR defaults to the work volume next to the source tree; CI mounts a directory
+# it persists with actions/cache. Skipped when ccache is not installed.
+if command -v ccache >/dev/null 2>&1 && [ -x "/usr/lib/ccache/${CROSS_COMPILE}gcc" ]; then
+	export CCACHE_DIR=${CCACHE_DIR:-$(dirname "${KERNEL_SRC_DIR}")/ccache}
+	export CCACHE_MAXSIZE=${CCACHE_MAXSIZE:-2G}
+	mkdir -p "${CCACHE_DIR}"
+	export PATH="/usr/lib/ccache:${PATH}"
+	ccache --zero-stats >/dev/null
+	log "ccache: ${CCACHE_DIR}, $(ccache -s 2>/dev/null | grep -i -m1 'cache size' | xargs)"
+	CCACHE_ENABLED=1
+else
+	log "ccache not available, compiling without it"
+	CCACHE_ENABLED=0
+fi
+
 # LOCALVERSION= (set but empty) stops scripts/setlocalversion from appending "+" for
 # an untagged tree; the visible suffix comes from CONFIG_LOCALVERSION in the fragment.
 kmake() {
@@ -134,6 +153,11 @@ log "Building kernel ${UPSTREAM} package ${KERNEL_VERSION} with ${KERNEL_JOBS} j
 # require a cross gcc even on a native host.
 DEB_BUILD_PROFILES=pkg.linux-upstream.nokernelheaders \
 	kmake KDEB_PKGVERSION="${KERNEL_VERSION}" KDEB_CHANGELOG_DIST=bookworm KDEB_COMPRESS=xz bindeb-pkg
+
+if [ "${CCACHE_ENABLED}" = "1" ]; then
+	log "ccache statistics for this build:"
+	ccache -s 2>/dev/null | grep -E -i 'hits|misses|cacheable|cache size' | sed 's/^/    /'
+fi
 
 KREL=$(kmake -s kernelrelease)
 DEB_NAME="linux-image-${KREL}_${KERNEL_VERSION}_arm64.deb"

@@ -27,10 +27,13 @@ RUN apt-get -y update && \
         curl xxd file kmod bc ca-certificates fdisk gpg pigz arch-test \
         qemu-user-static binfmt-support \
         build-essential bison flex libssl-dev libelf-dev libncurses-dev python3 cpio \
-        debhelper \
+        debhelper ccache \
     && if [ "$(dpkg --print-architecture)" != "arm64" ]; then \
         apt-get -y install --no-install-recommends crossbuild-essential-arm64; \
     fi \
+    # /usr/lib/ccache/<compiler> masquerade links for every compiler installed above;
+    # kernel/build-kernel.sh puts that directory first in PATH.
+    && update-ccache-symlinks \
     && rm -rf /var/lib/apt/lists/*
 
 # Repo layout is preserved: /build/pi-gen is the upstream submodule, /build/stage-*

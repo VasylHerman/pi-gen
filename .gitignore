@@ -8,3 +8,4 @@ work/
 .docker-build.log
 .claude/
 /*.log
+.ccache/

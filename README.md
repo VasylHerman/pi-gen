@@ -210,7 +210,11 @@ and then packages the result with the kernel's own `make bindeb-pkg`:
 3. `make bindeb-pkg` with `ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-`,
    `KDEB_PKGVERSION=<kernel/VERSION>` and the `nokernelheaders` build profile, giving
    `linux-image-<release>_<version>_arm64.deb` with the kernel, stripped modules, DTBs
-   and overlays;
+   and overlays. gcc runs behind ccache (`/usr/lib/ccache` first in `PATH`), with the
+   cache in the work volume by default or in `CCACHE_DIR` when set; in CI
+   `actions/cache` persists it, so a rebuild after a fragment change takes minutes
+   instead of the ~22 min from-scratch compile. ccache replays identical objects, so the
+   Image hash is unaffected;
 4. collect into the output directory: the `.deb`, the bare `Image` as `kernel8-demo.img`
    (QEMU), the `.config`, the overlays `README`, `kernel-release.env` and `SHA256SUMS`.
 
@@ -345,8 +349,9 @@ Upstream pi-gen variables are documented in `pi-gen/README.md`. Our additions:
 
 Wrapper environment (`scripts/build-image.sh`, `build-kernel.sh`): `CLEAN=1`,
 `CONTAINER_NAME`, `WORK_VOLUME` (volume name or host path), `IMG_NAME`, `PI_GEN_RELEASE`,
-`KERNEL_SOURCE`, `KERNEL_UPDATE`, `GITHUB_TOKEN` (private repositories), `DOCKER_PLATFORM`,
-`PIGEN_DOCKER_OPTS`, `DOCKER`.
+`KERNEL_SOURCE`, `KERNEL_UPDATE`, `GITHUB_TOKEN` (private repositories), `CCACHE_DIR`
+(host directory for the kernel compiler cache), `DOCKER_PLATFORM`, `PIGEN_DOCKER_OPTS`,
+`DOCKER`.
 
 ### Private repository
 
