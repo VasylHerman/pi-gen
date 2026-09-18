@@ -1,0 +1,142 @@
+# Build the custom kernel as a Debian package whenever its inputs change, and publish it
+# as GitHub release "kernel-v<kernel/VERSION>" when that change lands on main.
+#
+#   pull request touching kernel/ ...  -> build, boot-test, upload artifact
+#   push to main touching kernel/ ...  -> the same, then create the release (tag included)
+#   workflow_dispatch                  -> build + artifact only
+#
+# The version is explicit: bump kernel/VERSION ("<upstream>-demo.<N>") in the same PR
+# that changes the fragment or KERNEL_COMMIT. A push to main whose version is already
+# released fails here instead of publishing twice. Image builds consume the release
+# (config/release.conf, KERNEL_SOURCE=deb).
+name: kernel
+
+on:
+  pull_request:
+    paths:
+      - 'kernel/**'
+      - 'config/common.conf'
+      - 'Dockerfile'
+      - 'build-kernel.sh'
+      - 'scripts/docker-env.sh'
+      - 'scripts/qemu-smoke-test.sh'
+      - 'run-qemu.sh'
+      - '.github/workflows/kernel.yml'
+      - '.github/actions/**'
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'config/common.conf'
+      - 'Dockerfile'
+      - 'build-kernel.sh'
+      - 'scripts/docker-env.sh'
+      - '.github/workflows/kernel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kernel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/prepare-runner
+
+      - name: Version must not already be released
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="kernel-v$(tr -d '[:space:]' < kernel/VERSION)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::release $tag already exists; bump kernel/VERSION in the PR that changes the kernel"
+            exit 1
+          fi
+          echo "will publish $tag"
+
+      - name: Build kernel package
+        run: ./build-kernel.sh
+
+      - name: Read result
+        id: kernel
+        run: |
+          set -eu
+          . deploy/kernel-release.env
+          test "$KERNEL_VERSION" = "$(tr -d '[:space:]' < kernel/VERSION)"
+          {
+            echo "release=$KERNEL_RELEASE"
+            echo "version=$KERNEL_VERSION"
+            echo "deb=$KERNEL_DEB"
+          } >> "$GITHUB_OUTPUT"
+          ls -la deploy
+
+      - name: Boot test in QEMU against the latest image release
+        # The kernel alone cannot be booted; use the rootfs of the newest image release.
+        # A fresh repository without an image release skips this step.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag=$(gh release list --exclude-drafts --exclude-pre-releases --json tagName \
+                  --jq '[.[] | select(.tagName | startswith("v"))][0].tagName // empty')
+          if [ -z "$tag" ]; then
+            echo "::notice::no image release yet, skipping the boot test"
+            exit 0
+          fi
+          echo "booting kernel ${{ steps.kernel.outputs.release }} with the rootfs of $tag"
+          mkdir -p smoke && gh release download "$tag" --pattern 'image_*' --dir smoke
+          sudo apt-get -qq update && sudo apt-get -qq install -y qemu-system-arm xz-utils
+          KERNEL=deploy/kernel8-demo.img scripts/qemu-smoke-test.sh smoke/image_* "${{ steps.kernel.outputs.release }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.kernel.outputs.deb }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            deploy/linux-image-*.deb
+            deploy/kernel8-demo.img
+            deploy/config-*
+            deploy/overlays-README
+            deploy/kernel-release.env
+            deploy/SHA256SUMS
+
+      - name: Publish kernel release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          . deploy/kernel-release.env
+          tag="kernel-v$KERNEL_VERSION"
+          {
+            echo "Custom Raspberry Pi 4 kernel \`$KERNEL_RELEASE\` as a Debian package."
+            echo
+            echo "- source: $KERNEL_GIT_URL branch $KERNEL_BRANCH, commit $KERNEL_COMMIT"
+            echo "- config: $KERNEL_DEFCONFIG + kernel/demo.config (see \`config-$KERNEL_RELEASE\`)"
+            echo "- built by ${{ github.repository }}@${{ github.sha }}"
+            echo
+            echo "Install on a running device: \`sudo apt install ./$KERNEL_DEB\`, then copy"
+            echo "\`/boot/vmlinuz-$KERNEL_RELEASE\` to \`/boot/firmware/kernel8-demo.img\` (stage-kernel does this in images)."
+            echo
+            echo '```'
+            cat deploy/SHA256SUMS
+            echo '```'
+          } > deploy/RELEASE_NOTES.md
+          gh release create "$tag" \
+            --target "${{ github.sha }}" \
+            --title "$tag" \
+            --notes-file deploy/RELEASE_NOTES.md \
+            deploy/linux-image-*.deb deploy/kernel8-demo.img deploy/config-* \
+            deploy/overlays-README deploy/kernel-release.env deploy/SHA256SUMS

@@ -21,7 +21,15 @@ fi
 read_list() {
 	sed -f "${SCRIPT_DIR}/remove-comments.sed" < "$1"
 }
-KEEP=$(read_list files/keep-packages)
+# The custom kernel package is named after its release string, so it cannot be a static
+# keep-list entry; stage-kernel recorded it in /etc/demo-kernel.
+CUSTOM_KREL=$(sed -n 's/^KERNEL_RELEASE="\(.*\)"$/\1/p' "${ROOTFS_DIR}/etc/demo-kernel")
+CUSTOM_PKG=$(sed -n 's/^KERNEL_PACKAGE="\(.*\)"$/\1/p' "${ROOTFS_DIR}/etc/demo-kernel")
+if [ -z "${CUSTOM_KREL}" ] || [ -z "${CUSTOM_PKG}" ]; then
+	echo "ERROR: /etc/demo-kernel lacks KERNEL_RELEASE/KERNEL_PACKAGE; did stage-kernel run?" >&2
+	exit 1
+fi
+KEEP="$(read_list files/keep-packages) ${CUSTOM_PKG}"
 PURGE=$(read_list files/purge-packages)
 
 rootfs_size() {
@@ -68,8 +76,6 @@ rm -rf "${ROOTFS_DIR}/usr/share/man/"* "${ROOTFS_DIR}/usr/share/info/"*
 find "${ROOTFS_DIR}/usr/share/locale" -mindepth 1 -maxdepth 1 -type d ! -name 'en*' -exec rm -rf {} +
 
 # Modules of any kernel other than the custom one.
-CUSTOM_KREL=$(sed -n 's/^KERNEL_RELEASE="\(.*\)"$/\1/p' "${ROOTFS_DIR}/etc/demo-kernel")
-[ -n "${CUSTOM_KREL}" ] || { echo "ERROR: /etc/demo-kernel has no KERNEL_RELEASE" >&2; exit 1; }
 find "${ROOTFS_DIR}/usr/lib/modules" -mindepth 1 -maxdepth 1 -type d ! -name "${CUSTOM_KREL}" -exec rm -rf {} +
 
 # Boot partition: stock kernels/initramfs (the raspi-firmware hooks remove kernel8.img

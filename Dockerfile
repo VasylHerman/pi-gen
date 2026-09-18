@@ -1,9 +1,11 @@
 # Build environment for the Raspberry Pi 4 custom-kernel demo image.
 #
 # Contains everything pi-gen needs (debootstrap, loop devices, chroot tooling —
-# see pi-gen/depends and pi-gen/Dockerfile) plus the kernel build toolchain used
-# by stage-kernel. Built and run by scripts/build-image.sh (via ./build-dev.sh and
-# ./build-release.sh); not meant to be used directly.
+# see pi-gen/depends and pi-gen/Dockerfile) plus the kernel build and Debian
+# packaging toolchain used by kernel/build-kernel.sh (debhelper satisfies the
+# Build-Depends that `make bindeb-pkg` generates). Built and run by
+# scripts/build-image.sh (via ./build-dev.sh, ./build-release.sh) and ./build-kernel.sh;
+# not meant to be used directly.
 #
 # On an arm64 host (Apple Silicon, Pi, Graviton) the arm64 chroot runs natively and
 # the kernel is built with the native gcc (Debian still provides the
@@ -25,6 +27,7 @@ RUN apt-get -y update && \
         curl xxd file kmod bc ca-certificates fdisk gpg pigz arch-test \
         qemu-user-static binfmt-support \
         build-essential bison flex libssl-dev libelf-dev libncurses-dev python3 cpio \
+        debhelper \
     && if [ "$(dpkg --print-architecture)" != "arm64" ]; then \
         apt-get -y install --no-install-recommends crossbuild-essential-arm64; \
     fi \

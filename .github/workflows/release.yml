@@ -1,10 +1,12 @@
-# Build the Pi 4 demo image on every version tag and publish it as a GitHub release.
+# Build the Pi 4 release image on every version tag and publish it as a GitHub release.
 #
 #   git tag v1.0.0 && git push origin v1.0.0
 #
-# Runs on GitHub's arm64 runner so the arm64 chroot and the kernel build are native
-# (same path as a local build on Apple Silicon). Manual runs (workflow_dispatch) only
-# upload the image as a workflow artifact; tag pushes also create the release.
+# The image installs the kernel package published by kernel.yml as release
+# kernel-v<kernel/VERSION>; it never compiles a kernel (config/release.conf,
+# KERNEL_SOURCE=deb). If that release does not exist yet, this run fails early: merge
+# the kernel change first. Manual runs (workflow_dispatch) only upload the image as a
+# workflow artifact; tag pushes also create the release.
 name: release
 
 on:
@@ -22,7 +24,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    timeout-minutes: 120
     env:
       # Baked into file names, /etc/rpi-issue and the demo page.
       IMG_NAME: pi4-demo-${{ github.ref_type == 'tag' && github.ref_name || format('ci-{0}', github.run_number) }}
@@ -32,50 +34,47 @@ jobs:
         with:
           submodules: true
 
-      - name: Reclaim disk space
-        # Hosted runners ship several GB of toolchains this build never uses.
+      - name: Kernel release must exist
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
-                      /usr/local/share/boost /usr/share/swift /usr/local/.ghcup
-          sudo docker image prune -af >/dev/null 2>&1 || true
-          df -h / /mnt 2>/dev/null
+          tag="kernel-v$(tr -d '[:space:]' < kernel/VERSION)"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::kernel release $tag not found; merge the kernel change (kernel.yml publishes it) before tagging an image"
+            exit 1
+          fi
+          echo "using kernel release $tag"
 
-      - name: Place pi-gen work directory on the largest filesystem
-        # ~14 GB of stage rootfs copies and kernel objects. WORK_VOLUME accepts a host
-        # path as well as a Docker volume name (both are valid `docker run --volume` sources).
-        run: |
-          set -eu
-          best=/; bestfree=0
-          for m in / /mnt "$RUNNER_TEMP"; do
-            [ -d "$m" ] || continue
-            free=$(df -Pk "$m" | awk 'NR==2 {print $4}')
-            if [ "$free" -gt "$bestfree" ]; then best=$m; bestfree=$free; fi
-          done
-          work="${best%/}/pigen-work"
-          sudo mkdir -p "$work"
-          echo "WORK_VOLUME=$work" >> "$GITHUB_ENV"
-          echo "work dir: $work ($((bestfree / 1024 / 1024)) GB free)"
+      - uses: ./.github/actions/prepare-runner
 
       - name: Build release image
         run: ./build-release.sh
 
+      - name: Boot test in QEMU
+        run: |
+          set -eu
+          . deploy/kernel-release.env
+          sudo apt-get -qq update && sudo apt-get -qq install -y qemu-system-arm xz-utils
+          scripts/qemu-smoke-test.sh deploy/image_*.img.xz "$KERNEL_RELEASE"
+
       - name: Collect artifacts
-        id: collect
         run: |
           set -eu
           cd deploy
+          rm -f -- *.img
           # The raw .img would exceed the 2 GB release-asset limit; ship the compressed image.
           ls -la
+          . ./kernel-release.env
           sha256sum -- image_* kernel8-demo.img *.info > SHA256SUMS
-          kernel=$(grep -oE 'Built kernel [^ ]+ from [0-9a-f]+' build.log | tail -n1 || true)
           slim=$(grep -oE 'stage-slim: rootfs .*' build.log | tail -n1 || true)
           {
             echo "Raspberry Pi 4 (arm64, Bookworm) release image: custom kernel, nginx demo page, Wi-Fi and Bluetooth; build tools, stock kernels and other extras removed."
             echo
-            echo "- ${kernel:-kernel: see build.log}"
+            echo "- kernel: \`$KERNEL_RELEASE\` from release [kernel-v$KERNEL_VERSION](https://github.com/${{ github.repository }}/releases/tag/kernel-v$KERNEL_VERSION) (source commit $KERNEL_COMMIT)"
             echo "- ${slim:-size: see build.log}"
             echo "- pi-gen: $(git -C ../pi-gen rev-parse --short HEAD) (${{ github.repository }}@${{ github.sha }})"
             echo "- image: \`$(ls -- image_*)\` — flash with Raspberry Pi Imager, or boot with \`./run-qemu.sh\` (needs \`kernel8-demo.img\` next to it)"
+            echo "- boot-tested in QEMU on the runner before publishing"
             echo
             echo '```'
             cat SHA256SUMS

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Engine shared by ./build-dev.sh and ./build-release.sh: builds the Raspberry Pi 4
-# custom-kernel image inside Docker for one variant.
+# image inside Docker for one variant.
 #
 #   scripts/build-image.sh <variant> [build]   build; output lands in ./deploy/
 #   scripts/build-image.sh <variant> shell     root shell in the build environment, same volumes
@@ -14,30 +14,29 @@
 #   CONTAINER_NAME        default: pigen_<variant>
 #   WORK_VOLUME           default: ${CONTAINER_NAME}_work (persists between runs); a Docker
 #                         volume name, or an absolute host path (used by CI to pick a disk)
-#   IMG_NAME, PI_GEN_RELEASE  passed through to pi-gen; the config falls back to its defaults
-#   DOCKER_PLATFORM       default: the Docker server's native platform (linux/arm64 on
-#                         Apple Silicon). Set explicitly to override. This wins over a
-#                         DOCKER_DEFAULT_PLATFORM in your shell: an emulated amd64
-#                         container would compile the kernel under qemu, very slowly.
+#   IMG_NAME, PI_GEN_RELEASE, KERNEL_SOURCE, KERNEL_UPDATE
+#                         passed through to pi-gen; the config falls back to its defaults
+#   DOCKER_PLATFORM, DOCKER, IMAGE_TAG   see scripts/docker-env.sh
 #   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
 #
 # The work volume makes every run incremental: debootstrap output, stage rootfs
 # copies and the kernel source/object tree survive, so a re-run after a failure or a
 # change in stage-web takes minutes, not hours. See README.md for the SKIP workflow.
 #
-# Modelled on pi-gen/build-docker.sh. No bash arrays: macOS ships bash 3.2.
+# Modelled on pi-gen/build-docker.sh.
 set -eu
 
-DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
-DOCKER=${DOCKER:-docker}
+# shellcheck source=scripts/docker-env.sh
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/docker-env.sh"
+
 VARIANT=${1:-}
 CMD=${2:-build}
 
 variants() {
-	(cd "${DIR}/config" && ls -- *.conf | sed 's/\.conf$//' | grep -v '^common$' | tr '\n' ' ')
+	(cd "${ROOT}/config" && ls -- *.conf | sed 's/\.conf$//' | grep -v '^common$' | tr '\n' ' ')
 }
 
-if [ -z "${VARIANT}" ] || [ ! -f "${DIR}/config/${VARIANT}.conf" ]; then
+if [ -z "${VARIANT}" ] || [ ! -f "${ROOT}/config/${VARIANT}.conf" ]; then
 	echo "Usage: $0 <variant> [build|shell|reset]    variants: $(variants)" >&2
 	exit 1
 fi
@@ -45,81 +44,39 @@ fi
 CONFIG_IN_CONTAINER="/build/config/${VARIANT}.conf"
 CONTAINER_NAME=${CONTAINER_NAME:-pigen_${VARIANT}}
 WORK_VOLUME=${WORK_VOLUME:-${CONTAINER_NAME}_work}
-IMAGE_TAG=${IMAGE_TAG:-pi-gen-demo}
 PIGEN_DOCKER_OPTS=${PIGEN_DOCKER_OPTS:-}
 
-case "${DIR}" in
-	*" "*)
-		echo "debootstrap does not support paths containing spaces: ${DIR}" >&2
-		exit 1
-		;;
-esac
-
-if [ ! -f "${DIR}/pi-gen/build.sh" ]; then
-	echo "pi-gen submodule is missing. Run: git submodule update --init" >&2
-	exit 1
-fi
-
-if ! ${DOCKER} info >/dev/null 2>&1; then
-	echo "Cannot talk to Docker. Is Docker Desktop running?" >&2
-	exit 1
-fi
-
-if [ -z "${DOCKER_PLATFORM:-}" ]; then
-	case "$(${DOCKER} info --format '{{.Architecture}}')" in
-		aarch64|arm64) DOCKER_PLATFORM=linux/arm64 ;;
-		x86_64|amd64) DOCKER_PLATFORM=linux/amd64 ;;
-		*) echo "Unsupported Docker server architecture; set DOCKER_PLATFORM" >&2; exit 1 ;;
-	esac
-fi
-if [ -n "${DOCKER_DEFAULT_PLATFORM:-}" ] && [ "${DOCKER_DEFAULT_PLATFORM}" != "${DOCKER_PLATFORM}" ]; then
-	echo "Note: ignoring DOCKER_DEFAULT_PLATFORM=${DOCKER_DEFAULT_PLATFORM}, using native ${DOCKER_PLATFORM}"
-fi
+env_check
 
 case "${CMD}" in
 	reset)
-		case "${WORK_VOLUME}" in
-			/*) echo "WORK_VOLUME is a host path; remove it yourself: sudo rm -rf ${WORK_VOLUME}" >&2; exit 1 ;;
-		esac
-		${DOCKER} volume rm -f "${WORK_VOLUME}" >/dev/null
-		echo "Removed work volume ${WORK_VOLUME}"
+		env_remove_volume "${WORK_VOLUME}"
 		exit 0
 		;;
 	build|shell)
 		;;
 	*)
-		sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
 		exit 1
 		;;
 esac
 
-if [ -n "$(${DOCKER} ps -q --filter "name=^${CONTAINER_NAME}\$")" ]; then
-	echo "A build is already running in container ${CONTAINER_NAME}. Aborting." >&2
-	exit 1
-fi
-
-# pi-gen/build.sh records GIT_HASH in /etc/rpi-issue and would otherwise run
-# `git rev-parse` inside the container, where .git is not present.
-GIT_HASH=$(git -C "${DIR}" rev-parse HEAD 2>/dev/null \
-	|| git -C "${DIR}/pi-gen" rev-parse HEAD 2>/dev/null \
-	|| echo unknown)
-
-mkdir -p "${DIR}/deploy"
-
-echo "==> Building build-environment image ${IMAGE_TAG}"
-${DOCKER} build --platform "${DOCKER_PLATFORM}" -t "${IMAGE_TAG}" "${DIR}"
+env_assert_not_running "${CONTAINER_NAME}"
+mkdir -p "${ROOT}/deploy"
+env_build_image
 
 # shellcheck disable=SC2086
 run_container() {
-	${DOCKER} run --rm --privileged \
-		--platform "${DOCKER_PLATFORM}" \
+	env_run \
 		--name "${CONTAINER_NAME}" \
 		--volume "${WORK_VOLUME}:/build/pi-gen/work" \
-		--volume "${DIR}/deploy:/build/pi-gen/deploy" \
-		-e "GIT_HASH=${GIT_HASH}" \
+		--volume "${ROOT}/deploy:/build/pi-gen/deploy" \
+		-e "GIT_HASH=$(env_git_hash)" \
 		-e "CLEAN=${CLEAN:-}" \
 		-e "IMG_NAME=${IMG_NAME:-}" \
 		-e "PI_GEN_RELEASE=${PI_GEN_RELEASE:-}" \
+		-e "KERNEL_SOURCE=${KERNEL_SOURCE:-}" \
+		-e "KERNEL_UPDATE=${KERNEL_UPDATE:-}" \
 		-e "PIGEN_CONFIG=${CONFIG_IN_CONTAINER}" \
 		${PIGEN_DOCKER_OPTS} \
 		"$@"
@@ -142,6 +99,5 @@ run_container "${IMAGE_TAG}" bash -e -o pipefail -c '
 	./build.sh -c "${PIGEN_CONFIG}"
 	cp -f work/*/build.log deploy/ 2>/dev/null || true
 '
-ELAPSED=$(( $(date +%s) - START ))
-echo "==> Done in $((ELAPSED / 60)) min $((ELAPSED % 60)) s. Images in ${DIR}/deploy:"
-ls -lah "${DIR}/deploy"
+echo "==> Done in $(env_elapsed $(( $(date +%s) - START ))). Images in ${ROOT}/deploy:"
+ls -lah "${ROOT}/deploy"

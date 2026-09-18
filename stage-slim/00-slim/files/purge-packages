@@ -9,8 +9,9 @@ build-essential gcc g++ cpp make dpkg-dev gcc-12 g++-12 cpp-12
 libc6-dev libstdc++-12-dev libgcc-12-dev linux-libc-dev
 gdb libc6-dbg strace manpages-dev pkg-config
 
-# stock Debian kernels and headers: the custom kernel is the only kernel
-linux-image-* linux-headers-* linux-kbuild-*
+# stock Debian kernels and headers: the custom kernel (linux-image-<release>-v8-demo,
+# protected by stage-slim from /etc/demo-kernel) is the only kernel
+linux-image-rpi-* linux-image-*+rpt* linux-headers-* linux-kbuild-*
 
 # Wi-Fi firmware for chips the Pi 4 does not have (on-board is firmware-brcm80211)
 firmware-atheros firmware-libertas firmware-realtek firmware-mediatek
