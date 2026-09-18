@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           submodules: true
 
@@ -58,7 +58,7 @@ jobs:
         # fragment or the packaging changed. Entries are immutable, so every run saves
         # under a new key and the next run restores the most recent one for the same
         # kernel inputs (falling back to any arm64 cache).
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ccache-kernel-${{ runner.arch }}-${{ hashFiles('kernel/**', 'Dockerfile') }}-${{ github.run_id }}
@@ -104,7 +104,7 @@ jobs:
           KERNEL=deploy/kernel8-demo.img scripts/qemu-smoke-test.sh smoke/image_* "${{ steps.kernel.outputs.release }}"
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ steps.kernel.outputs.deb }}
           retention-days: 14
