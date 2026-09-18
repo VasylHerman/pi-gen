@@ -1,0 +1,5 @@
+// Installed by stage-slim.
+// No translated package descriptions in /var/lib/apt/lists (export-image re-runs
+// apt-get update, so the lists themselves stay), and no Recommends by default.
+Acquire::Languages "none";
+APT::Install-Recommends "false";

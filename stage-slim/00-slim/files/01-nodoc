@@ -1,0 +1,11 @@
+# Installed by stage-slim. Keeps dpkg from unpacking documentation, man pages and
+# non-English message catalogs for every package installed from now on, including
+# what export-image's dist-upgrade and later `apt upgrade` on the device bring in.
+# License texts are kept.
+path-exclude /usr/share/doc/*
+path-include /usr/share/doc/*/copyright
+path-exclude /usr/share/man/*
+path-exclude /usr/share/info/*
+path-exclude /usr/share/locale/*
+path-include /usr/share/locale/locale.alias
+path-include /usr/share/locale/en*

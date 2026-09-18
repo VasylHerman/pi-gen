@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# Build the Raspberry Pi 4 custom-kernel demo image inside Docker.
+# Engine shared by ./build-dev.sh and ./build-release.sh: builds the Raspberry Pi 4
+# custom-kernel image inside Docker for one variant.
 #
-#   ./build.sh            build the image; output lands in ./deploy/
-#   ./build.sh shell      root shell in the build environment with the same volumes
-#   ./build.sh reset      delete the cached work volume (kernel source + stage rootfs)
+#   scripts/build-image.sh <variant> [build]   build; output lands in ./deploy/
+#   scripts/build-image.sh <variant> shell     root shell in the build environment, same volumes
+#   scripts/build-image.sh <variant> reset     delete the variant's cached work volume
+#
+# <variant> selects config/<variant>.conf (dev, release). Each variant gets its own
+# container name and work volume, so both can be built side by side.
 #
 # Environment:
 #   CLEAN=1               pi-gen: rebuild the rootfs of every stage that has no SKIP file
-#   CONTAINER_NAME        default: pigen_demo
+#   CONTAINER_NAME        default: pigen_<variant>
 #   WORK_VOLUME           default: ${CONTAINER_NAME}_work (persists between runs); a Docker
 #                         volume name, or an absolute host path (used by CI to pick a disk)
-#   IMG_NAME, PI_GEN_RELEASE  passed through to pi-gen; config falls back to its defaults
-#   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
+#   IMG_NAME, PI_GEN_RELEASE  passed through to pi-gen; the config falls back to its defaults
 #   DOCKER_PLATFORM       default: the Docker server's native platform (linux/arm64 on
 #                         Apple Silicon). Set explicitly to override. This wins over a
 #                         DOCKER_DEFAULT_PLATFORM in your shell: an emulated amd64
 #                         container would compile the kernel under qemu, very slowly.
+#   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
 #
 # The work volume makes every run incremental: debootstrap output, stage rootfs
 # copies and the kernel source/object tree survive, so a re-run after a failure or a
@@ -24,13 +28,25 @@
 # Modelled on pi-gen/build-docker.sh. No bash arrays: macOS ships bash 3.2.
 set -eu
 
-DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 DOCKER=${DOCKER:-docker}
-CONTAINER_NAME=${CONTAINER_NAME:-pigen_demo}
+VARIANT=${1:-}
+CMD=${2:-build}
+
+variants() {
+	(cd "${DIR}/config" && ls -- *.conf | sed 's/\.conf$//' | grep -v '^common$' | tr '\n' ' ')
+}
+
+if [ -z "${VARIANT}" ] || [ ! -f "${DIR}/config/${VARIANT}.conf" ]; then
+	echo "Usage: $0 <variant> [build|shell|reset]    variants: $(variants)" >&2
+	exit 1
+fi
+
+CONFIG_IN_CONTAINER="/build/config/${VARIANT}.conf"
+CONTAINER_NAME=${CONTAINER_NAME:-pigen_${VARIANT}}
 WORK_VOLUME=${WORK_VOLUME:-${CONTAINER_NAME}_work}
 IMAGE_TAG=${IMAGE_TAG:-pi-gen-demo}
 PIGEN_DOCKER_OPTS=${PIGEN_DOCKER_OPTS:-}
-CMD=${1:-build}
 
 case "${DIR}" in
 	*" "*)
@@ -72,7 +88,7 @@ case "${CMD}" in
 	build|shell)
 		;;
 	*)
-		sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
 		exit 1
 		;;
 esac
@@ -104,6 +120,7 @@ run_container() {
 		-e "CLEAN=${CLEAN:-}" \
 		-e "IMG_NAME=${IMG_NAME:-}" \
 		-e "PI_GEN_RELEASE=${PI_GEN_RELEASE:-}" \
+		-e "PIGEN_CONFIG=${CONFIG_IN_CONTAINER}" \
 		${PIGEN_DOCKER_OPTS} \
 		"$@"
 }
@@ -113,7 +130,7 @@ if [ "${CMD}" = "shell" ]; then
 	exit 0
 fi
 
-echo "==> Running pi-gen in container ${CONTAINER_NAME} (work volume: ${WORK_VOLUME})"
+echo "==> Running pi-gen (${VARIANT}) in container ${CONTAINER_NAME} (work volume: ${WORK_VOLUME})"
 START=$(date +%s)
 run_container "${IMAGE_TAG}" bash -e -o pipefail -c '
 	if [ "$(uname -m)" != "aarch64" ]; then
@@ -122,8 +139,9 @@ run_container "${IMAGE_TAG}" bash -e -o pipefail -c '
 		mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
 	fi
 	cd /build/pi-gen
-	./build.sh -c /build/config
+	./build.sh -c "${PIGEN_CONFIG}"
 	cp -f work/*/build.log deploy/ 2>/dev/null || true
 '
-echo "==> Done in $(( ($(date +%s) - START) / 60 )) min. Images in ${DIR}/deploy:"
+ELAPSED=$(( $(date +%s) - START ))
+echo "==> Done in $((ELAPSED / 60)) min $((ELAPSED % 60)) s. Images in ${DIR}/deploy:"
 ls -lah "${DIR}/deploy"

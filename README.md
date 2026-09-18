@@ -1,53 +1,72 @@
 # Raspberry Pi 4 custom-kernel demo image
 
 A [pi-gen](https://github.com/RPi-Distro/pi-gen) based build system that produces a
-bootable Raspberry Pi OS Lite (Bookworm, 64-bit) image for the Raspberry Pi 4 with:
+bootable Raspberry Pi OS (Bookworm, 64-bit) image for the Raspberry Pi 4 with:
 
 * a **kernel built from source** (`raspberrypi/linux`, `rpi-6.12.y`, `bcm2711_defconfig`
   plus a Kconfig fragment) installed as `/boot/firmware/kernel8-demo.img` and selected
-  in `config.txt`, with the stock Debian kernel left in place as a fallback;
+  in `config.txt`;
 * **nginx** serving a static demo page (`index.html` + SVG image) on port 80, with a
   small service that publishes live `uname`/system facts as `/sysinfo.json` so the
   page can show that the custom kernel is the one running.
 
-This is a demo project. The image ships a fixed user/password and SSH enabled; see
-`config` before reusing any of this for something real.
+Two variants come out of the same stages:
+
+| | `./build-dev.sh` | `./build-release.sh` |
+| --- | --- | --- |
+| Base | complete Raspberry Pi OS Lite (pi-gen stage2) | the same, then `stage-slim` removes what the server does not need |
+| Kernels | custom + stock Debian kernel as fallback | custom kernel only |
+| Extras | compilers, gdb, GPIO/camera/media tooling, all Wi-Fi firmware, docs, man pages | none of those; Wi-Fi (on-board Broadcom) and Bluetooth stay |
+| Output | `deploy/image_<date>-pi4-demo-dev.zip`, ~666 MB | `deploy/image_<date>-pi4-demo.img.xz`, ~158 MB ([details](#image-size)) |
+| Use | bench work, debugging on the device | flashing devices, CI releases |
+
+This is a demo project. Both images ship a fixed user/password and SSH enabled; see
+`config/common.conf` before reusing any of this for something real.
 
 ## Layout
 
 ```
 .
-├── .github/workflows/release.yml  tag push -> build on arm64 runner -> GitHub release
-├── build.sh                 Docker wrapper: builds the environment, runs pi-gen, collects deploy/
+├── .github/workflows/release.yml  tag push -> build-release.sh on arm64 runner -> GitHub release
+├── build-dev.sh / build-release.sh  one-line wrappers: scripts/build-image.sh <variant>
+├── scripts/build-image.sh   the engine: builds the Docker environment, runs pi-gen, collects deploy/
 ├── Dockerfile               Debian Bookworm + pi-gen deps + kernel toolchain
-├── config                   pi-gen config (image name, user, STAGE_LIST, KERNEL_* knobs)
+├── config/
+│   ├── common.conf          everything shared: user, locale, STAGE_LIST, KERNEL_* knobs
+│   ├── dev.conf             IMG_NAME=pi4-demo-dev, zip, RELEASE_SLIM=0
+│   └── release.conf         IMG_NAME=pi4-demo, xz,  RELEASE_SLIM=1
 ├── pi-gen/                  upstream pi-gen, git submodule, branch bookworm-arm64 (unmodified)
 ├── run-qemu.sh              boots deploy/*.img in qemu-system-aarch64 (virt machine, HVF/KVM)
 ├── stage-kernel/            builds and installs the custom kernel
 │   └── 00-build-kernel/
 │       ├── 00-run.sh        clone → defconfig + fragment → build → install into rootfs
-│       └── files/demo.config  Kconfig fragment (LOCALVERSION, /proc/config.gz)
-└── stage-web/               EXPORT_IMAGE lives here: this stage becomes the image
-    └── 00-nginx/
-        ├── 00-packages      nginx-light
-        ├── 01-run.sh        copy www/, bake build facts, install service, enable units
-        └── files/           nginx site, demo-sysinfo script + unit, www/index.html, www/pi-demo.svg
+│       └── files/demo.config  Kconfig fragment (LOCALVERSION, /proc/config.gz, virtio)
+├── stage-web/               nginx + demo page
+│   └── 00-nginx/
+│       ├── 00-packages      nginx-light
+│       ├── 01-run.sh        copy www/, bake build facts, install service, enable units
+│       └── files/           nginx site, demo-sysinfo script + unit, www/index.html, www/pi-demo.svg
+└── stage-slim/              EXPORT_IMAGE lives here: this rootfs becomes the image
+    └── 00-slim/
+        ├── 00-run.sh        no-op unless RELEASE_SLIM=1; purge, verify keep-list, trim files
+        └── files/           keep-packages, purge-packages, dpkg/apt policy snippets
 ```
 
-`STAGE_LIST` in `config` runs upstream `stage0 stage1 stage2` (= Raspberry Pi OS Lite)
-and then the two stages above. pi-gen itself is not patched; the only thing the
-Dockerfile adds inside the submodule is `stage2/SKIP_IMAGES` so that only the final
-stage is exported.
+`STAGE_LIST` in `config/common.conf` runs upstream `stage0 stage1 stage2` (= Raspberry Pi
+OS Lite) and then `stage-kernel stage-web stage-slim`, identical for both variants; the
+variant files only set the image name, the compression and `RELEASE_SLIM`. pi-gen itself
+is not patched; the only thing the Dockerfile adds inside the submodule is
+`stage2/SKIP_IMAGES` so that only the final stage is exported.
 
 ## Prerequisites
 
 * Docker Desktop (tested on Apple Silicon; the container is native arm64 there). On an
   amd64 host the Dockerfile adds `qemu-user-static` and `crossbuild-essential-arm64`
-  and the wrapper registers binfmt, which needs a Linux host kernel with `binfmt_misc`.
-* Roughly 25 GB free in Docker's disk image: stage rootfs copies (~2 GB each), the
-  kernel source and object tree (~10 GB), and the exported image.
-* Time: the first build takes 1–2 hours (debootstrap, apt, kernel compile). Later
-  runs are incremental.
+  and the engine registers binfmt, which needs a Linux host kernel with `binfmt_misc`.
+* Roughly 20 GB free in Docker's disk image per variant: stage rootfs copies (~1.8 GB
+  each), the kernel source and object tree (~3 GB), and the exported image.
+* Time: about 10 minutes for a full build on an M-series Mac, 6 of them the kernel
+  compile. Later runs are incremental.
 
 Clone with the submodule:
 
@@ -60,14 +79,17 @@ git submodule update --init
 ## Build
 
 ```sh
-./build.sh
+./build-release.sh     # production image
+./build-dev.sh         # developer image
 ```
 
-Output: `deploy/<date>-pi4-demo.zip` (an `.img` inside; set `DEPLOY_COMPRESSION=none`
-in `config` for a raw `.img`) plus `build.log`. Flash the image with Raspberry Pi
-Imager or `dd`, boot a Pi 4 / 400 / CM4, and open <http://pi-demo.local/>.
+Both accept `shell` (root shell in the build environment with the variant's volumes)
+and `reset` (delete the variant's cached work volume). Output lands in `deploy/`:
+the compressed image, `kernel8-demo.img` (for QEMU), the `.info` package list and
+`build.log`. Set `DEPLOY_COMPRESSION=none` in the variant file for a raw `.img`.
 
-Verify on the board:
+Flash the image with Raspberry Pi Imager or `dd`, boot a Pi 4 / 400 / CM4, and open
+<http://pi-demo.local/>. Verify on the board:
 
 ```sh
 ssh pi@pi-demo.local          # password: raspberry (demo only)
@@ -80,18 +102,18 @@ curl -s http://localhost/sysinfo.json
 
 ### Releases from CI
 
-`.github/workflows/release.yml` builds the image on GitHub's arm64 runner and publishes
-a release whenever a version tag is pushed:
+`.github/workflows/release.yml` runs `./build-release.sh` on GitHub's arm64 runner and
+publishes a release whenever a version tag is pushed:
 
 ```sh
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release carries `image_<date>-pi4-demo-v1.0.0.zip`, `kernel8-demo.img` (for
+The release carries `image_<date>-pi4-demo-v1.0.0.img.xz`, `kernel8-demo.img` (for
 `run-qemu.sh`), the `.info` package list, `build.log` and `SHA256SUMS`. The tag is baked
 into the image name, `/etc/rpi-issue` and the demo page via `IMG_NAME` and
-`PI_GEN_RELEASE`, which `config` accepts from the environment. A manual run from the
+`PI_GEN_RELEASE`, which the configs accept from the environment. A manual run from the
 Actions tab (workflow_dispatch) builds and uploads the same files as a workflow artifact
 without creating a release. Expect 30 to 45 minutes on the 4-vCPU runner.
 
@@ -99,7 +121,7 @@ without creating a release. Expect 30 to 45 minutes on the 4-vCPU runner.
 
 ```sh
 brew install qemu        # macOS; QEMU >= 8 with the arm64 system emulator
-./run-qemu.sh            # boots the newest deploy/*.img, console in this terminal
+./run-qemu.sh            # boots the newest deploy/*.img (extracts the zip/xz if needed)
 ```
 
 Then open <http://localhost:8080/> or `ssh -p 2222 pi@localhost`. Quit with `Ctrl-a x`.
@@ -118,18 +140,19 @@ watching the kernel come up on the serial console.
 
 ### Iterating
 
-All state lives in the Docker volume `pigen_demo_work`, so every run resumes where the
-last one stopped: debootstrap output is reused, kernel compilation is incremental, and
-stage scripts re-run on the existing rootfs. The standard pi-gen workflow applies:
+Each variant keeps its state in a Docker volume (`pigen_dev_work`, `pigen_release_work`),
+so every run resumes where the last one stopped: debootstrap output is reused, kernel
+compilation is incremental, and stage scripts re-run on the existing rootfs. The
+standard pi-gen workflow applies (shown for dev; same for release):
 
 | Goal | Command |
 | --- | --- |
-| Re-run after a failed or interrupted build | `./build.sh` |
-| Change only the web content | `touch stage-kernel/SKIP` (and `pi-gen/stage{0,1,2}/SKIP`), then `CLEAN=1 ./build.sh` |
-| Rebuild the kernel from the current source tree | `touch pi-gen/stage{0,1,2}/SKIP; CLEAN=1 ./build.sh` |
-| Pull the newest commits on `KERNEL_BRANCH` | set `KERNEL_UPDATE=1` in `config` for one run |
-| Start from scratch | `./build.sh reset && ./build.sh` |
-| Poke around the build environment | `./build.sh shell` |
+| Re-run after a failed or interrupted build | `./build-dev.sh` |
+| Change only the web content or the slim lists | `touch stage-kernel/SKIP pi-gen/stage{0,1,2}/SKIP`, then `CLEAN=1 ./build-dev.sh` |
+| Rebuild the kernel from the current source tree | `touch pi-gen/stage{0,1,2}/SKIP; CLEAN=1 ./build-dev.sh` |
+| Pull the newest commits on `KERNEL_BRANCH` | set `KERNEL_UPDATE=1` in `config/common.conf` for one run |
+| Start from scratch | `./build-dev.sh reset && ./build-dev.sh` |
+| Poke around the build environment | `./build-dev.sh shell` |
 
 `SKIP` in a stage directory means "do not run this stage, reuse its rootfs from the work
 volume". `CLEAN=1` deletes and recreates the rootfs of every stage that is *not*
@@ -161,8 +184,9 @@ one.
 
 Design notes:
 
-* The stock `linux-image-rpi-v8` package stays installed. To boot it instead, comment
-  out the `kernel=` line in `/boot/firmware/config.txt`.
+* In the dev image the stock `linux-image-rpi-v8` package stays installed. To boot it
+  instead, comment out the `kernel=` line in `/boot/firmware/config.txt`. The release
+  image has no stock kernel.
 * The custom kernel is *not* registered as `/boot/vmlinuz-<release>`. `update-initramfs
   -k all` (run by pi-gen's export step) enumerates that path, and the `raspi-firmware`
   hooks only know the `-rpi-v8` / `-rpi-2712` flavours, so keeping the kernel out of
@@ -170,18 +194,58 @@ Design notes:
   storage and ext4 built in and boots without an initramfs; `auto_initramfs=1` looks
   for `initramfs8-demo`, finds nothing, and loads none.
 * The DTBs and overlays in `/boot/firmware` are the ones built from the custom tree
-  (same 6.12 series as the stock kernel, so both kernels boot with them). A later
-  `apt upgrade` of the stock kernel package will rewrite them from the stock package;
-  that is fine for the stock kernel and normally fine for ours, but pin
-  `KERNEL_COMMIT` if you want to be sure what you tested is what you ship.
+  (same 6.12 series as the stock kernel, so both kernels boot with them). In the dev
+  image a later `apt upgrade` of the stock kernel package rewrites them from the stock
+  package; normally fine, but pin `KERNEL_COMMIT` if you want to be sure what you tested
+  is what you ship.
+
+## The release image
+
+`stage-slim/00-slim/00-run.sh` runs only when `RELEASE_SLIM=1`. It never touches
+pi-gen; it works on the finished rootfs:
+
+1. installs a dpkg `path-exclude` policy (no docs, man pages or non-English message
+   catalogs for anything installed later, licenses kept) and an apt policy (no
+   translation lists, no Recommends);
+2. marks every package in `files/keep-packages` as manually installed, purges
+   `files/purge-packages` with `--auto-remove`, runs `autoremove --purge`, and fails the
+   build if anything from the keep-list disappeared;
+3. deletes already-installed docs, man pages and non-English locales, the modules of
+   every kernel except the custom one, and from `/boot/firmware` the stock kernels,
+   initramfs files, Pi 5 kernel, other boards' device trees and the Pi 1-3 firmware
+   variants;
+4. logs the rootfs size before and after (`grep stage-slim deploy/build.log`).
+
+Adjust the two lists to taste. Things that look removable but are not: `initramfs-tools`
+and `linux-base` (pi-gen's export step calls `update-initramfs`), `python3` (a
+dependency of `rpi-eeprom`), `lua5.1` (a dependency of `raspi-config`), and
+`/var/lib/apt/lists` (the export step re-runs `apt-get update`, so deleting them here
+only gets undone).
+
+### Image size
+
+Measured on the 2026-09-18 builds (kernel 6.12.110):
+
+| | dev | release |
+| --- | --- | --- |
+| rootfs (uncompressed) | 1800 MB, 606 packages | 758 MB, 375 packages |
+| boot partition contents | 88 MB (3 kernels, 2 initramfs, all boards' firmware) | 38 MB (custom kernel, Pi 4 firmware and DTBs) |
+| raw `.img` | 2.7 GB | 1.6 GB |
+| compressed image | 666 MB zip | 158 MB xz |
+
+The `stage-slim:` line in `deploy/build.log` reports the rootfs numbers of every release
+build.
 
 ## Configuration knobs
 
-Everything is in `config` (bash, sourced by pi-gen). Upstream variables are documented
-in `pi-gen/README.md`. Our additions:
+Everything is in `config/` (bash, sourced by pi-gen). Upstream variables are documented
+in `pi-gen/README.md`. Our additions, all in `common.conf` unless noted:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `IMG_NAME` | `pi4-demo-dev` / `pi4-demo` (variant file) | image and work-dir name; CI appends the tag |
+| `DEPLOY_COMPRESSION` | `zip` / `xz` (variant file) | `none`, `zip`, `gz` or `xz` |
+| `RELEASE_SLIM` | `0` / `1` (variant file) | run stage-slim |
 | `KERNEL_GIT_URL` | `https://github.com/raspberrypi/linux.git` | kernel source |
 | `KERNEL_BRANCH` | `rpi-6.12.y` | branch to shallow-clone |
 | `KERNEL_COMMIT` | empty | pin an exact commit |
@@ -191,9 +255,9 @@ in `pi-gen/README.md`. Our additions:
 | `KERNEL_UPDATE` | `0` | `1` re-fetches the branch tip on each build |
 | `KERNEL_JOBS` | `nproc` | make parallelism |
 
-Wrapper (`build.sh`) environment: `CLEAN=1`, `CONTAINER_NAME`, `WORK_VOLUME` (volume
-name or host path), `IMG_NAME`, `PI_GEN_RELEASE`, `DOCKER_PLATFORM`, `PIGEN_DOCKER_OPTS`,
-`DOCKER`.
+Engine (`scripts/build-image.sh`) environment: `CLEAN=1`, `CONTAINER_NAME`, `WORK_VOLUME`
+(volume name or host path), `IMG_NAME`, `PI_GEN_RELEASE`, `DOCKER_PLATFORM`,
+`PIGEN_DOCKER_OPTS`, `DOCKER`.
 
 ## Building without Docker
 
@@ -201,7 +265,7 @@ On a Debian/Ubuntu arm64 host with the packages from `Dockerfile` installed:
 
 ```sh
 touch pi-gen/stage2/SKIP_IMAGES
-sudo GIT_HASH=$(git rev-parse HEAD) pi-gen/build.sh -c "$PWD/config"
+sudo GIT_HASH=$(git rev-parse HEAD) pi-gen/build.sh -c "$PWD/config/release.conf"
 ```
 
 ## References

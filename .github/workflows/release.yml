@@ -56,24 +56,26 @@ jobs:
           echo "WORK_VOLUME=$work" >> "$GITHUB_ENV"
           echo "work dir: $work ($((bestfree / 1024 / 1024)) GB free)"
 
-      - name: Build image
-        run: ./build.sh
+      - name: Build release image
+        run: ./build-release.sh
 
       - name: Collect artifacts
         id: collect
         run: |
           set -eu
           cd deploy
-          # The raw .img would exceed the 2 GB release-asset limit; ship the zip.
+          # The raw .img would exceed the 2 GB release-asset limit; ship the compressed image.
           ls -la
-          sha256sum -- *.zip kernel8-demo.img *.info > SHA256SUMS
+          sha256sum -- image_* kernel8-demo.img *.info > SHA256SUMS
           kernel=$(grep -oE 'Built kernel [^ ]+ from [0-9a-f]+' build.log | tail -n1 || true)
+          slim=$(grep -oE 'stage-slim: rootfs .*' build.log | tail -n1 || true)
           {
-            echo "Raspberry Pi 4 (arm64, Bookworm Lite) image with a custom kernel and nginx demo page."
+            echo "Raspberry Pi 4 (arm64, Bookworm) release image: custom kernel, nginx demo page, Wi-Fi and Bluetooth; build tools, stock kernels and other extras removed."
             echo
             echo "- ${kernel:-kernel: see build.log}"
+            echo "- ${slim:-size: see build.log}"
             echo "- pi-gen: $(git -C ../pi-gen rev-parse --short HEAD) (${{ github.repository }}@${{ github.sha }})"
-            echo "- image: \`$(ls -- *.zip)\` — flash with Raspberry Pi Imager, or boot with \`./run-qemu.sh\` (needs \`kernel8-demo.img\` next to it)"
+            echo "- image: \`$(ls -- image_*)\` — flash with Raspberry Pi Imager, or boot with \`./run-qemu.sh\` (needs \`kernel8-demo.img\` next to it)"
             echo
             echo '```'
             cat SHA256SUMS
@@ -88,7 +90,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: |
-            deploy/*.zip
+            deploy/image_*
             deploy/kernel8-demo.img
             deploy/*.info
             deploy/build.log
@@ -103,4 +105,4 @@ jobs:
             --verify-tag \
             --title "${{ github.ref_name }}" \
             --notes-file deploy/RELEASE_NOTES.md \
-            deploy/*.zip deploy/kernel8-demo.img deploy/*.info deploy/build.log deploy/SHA256SUMS
+            deploy/image_* deploy/kernel8-demo.img deploy/*.info deploy/build.log deploy/SHA256SUMS

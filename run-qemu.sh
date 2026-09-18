@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Boot the built image under QEMU (no Raspberry Pi needed).
+# Boot a built image under QEMU (no Raspberry Pi needed).
 #
-#   ./run-qemu.sh                 newest deploy/*.img (unzips deploy/*.zip if needed)
+#   ./run-qemu.sh                 newest deploy/*.img (extracts deploy/*.zip or *.img.xz if needed)
 #   ./run-qemu.sh path/to.img     a specific image
 #
 # Uses the `virt` machine with the custom kernel from deploy/kernel8-demo.img: the
@@ -30,22 +30,30 @@ if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
 	exit 1
 fi
 
+newest() {
+	ls -t "$@" 2>/dev/null | head -n1 || true
+}
+
 IMG=${1:-}
 if [ -z "${IMG}" ]; then
-	IMG=$(ls -t "${DEPLOY}"/*.img 2>/dev/null | head -n1 || true)
+	IMG=$(newest "${DEPLOY}"/*.img)
 fi
 if [ -z "${IMG}" ]; then
-	ZIP=$(ls -t "${DEPLOY}"/*.zip 2>/dev/null | head -n1 || true)
-	if [ -z "${ZIP}" ]; then
-		echo "No image in ${DEPLOY}. Run ./build.sh first." >&2
+	ARCHIVE=$(newest "${DEPLOY}"/*.zip "${DEPLOY}"/*.img.xz "${DEPLOY}"/*.img.gz)
+	if [ -z "${ARCHIVE}" ]; then
+		echo "No image in ${DEPLOY}. Run ./build-dev.sh or ./build-release.sh first." >&2
 		exit 1
 	fi
-	echo "==> Extracting ${ZIP}"
-	unzip -o -q "${ZIP}" '*.img' -d "${DEPLOY}"
-	IMG=$(ls -t "${DEPLOY}"/*.img | head -n1)
+	echo "==> Extracting ${ARCHIVE}"
+	case "${ARCHIVE}" in
+		*.zip) unzip -o -q "${ARCHIVE}" '*.img' -d "${DEPLOY}" ;;
+		*.xz) xz -dk "${ARCHIVE}" ;;
+		*.gz) gunzip -k "${ARCHIVE}" ;;
+	esac
+	IMG=$(newest "${DEPLOY}"/*.img)
 fi
 if [ ! -f "${KERNEL}" ]; then
-	echo "Kernel ${KERNEL} not found; stage-kernel copies it into deploy/ during ./build.sh" >&2
+	echo "Kernel ${KERNEL} not found; stage-kernel copies it into deploy/ during a build" >&2
 	exit 1
 fi
 
