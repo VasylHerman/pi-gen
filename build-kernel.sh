@@ -43,7 +43,7 @@ mkdir -p "${ROOT}/deploy"
 env_build_image
 
 run_container() {
-	# Same mount points as an image build, so KERNEL_SRC_DIR from config/common.conf
+	# Same mount points as an image build, so KERNEL_SRC_DIR from kernel/kernel.conf
 	# (${BASE_DIR}/work/kernel/linux) resolves identically.
 	env_run \
 		--name "${CONTAINER_NAME}" \
@@ -62,9 +62,7 @@ fi
 echo "==> Building kernel package in container ${CONTAINER_NAME} (work volume: ${WORK_VOLUME})"
 START=$(date +%s)
 run_container "${IMAGE_TAG}" bash -e -o pipefail -c '
-	export BASE_DIR=/build/pi-gen
-	. /build/config/common.conf
-	OUT_DIR=/build/pi-gen/deploy /build/kernel/build-kernel.sh
+	BASE_DIR=/build/pi-gen OUT_DIR=/build/pi-gen/deploy /build/kernel/build-kernel.sh
 '
 echo "==> Done in $(env_elapsed $(( $(date +%s) - START ))). Results in ${ROOT}/deploy:"
 ls -lah "${ROOT}/deploy"

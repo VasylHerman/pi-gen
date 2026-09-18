@@ -14,7 +14,7 @@ Two artifacts, two pipelines:
 
 | | Kernel | Image |
 | --- | --- | --- |
-| Source of truth | `kernel/` (fragment, `VERSION`), `KERNEL_COMMIT` in `config/common.conf` | `stage-*`, `config/` |
+| Source of truth | `kernel/`: `kernel.conf` (source commit, defconfig), `demo.config`, `VERSION` | `stage-*`, `config/` |
 | Build locally | `./build-kernel.sh` | `./build-dev.sh`, `./build-release.sh` |
 | CI | `kernel.yml`: every change under `kernel/` is built and boot-tested; merging to `main` publishes release `kernel-v<VERSION>` | `release.yml`: a `v*` tag builds the release image with the published kernel package, boot-tests it, publishes |
 | Output | `linux-image-<release>_<version>_arm64.deb` | `image_<date>-pi4-demo[-<tag>].img.xz` |
@@ -39,7 +39,7 @@ This is a demo project. Both images ship a fixed user/password and SSH enabled; 
 ├── .github/
 │   ├── actions/prepare-runner/  composite action: reclaim disk, pick the work directory
 │   └── workflows/
-│       ├── kernel.yml           kernel/ changed -> build .deb, boot-test; on main -> release kernel-v<VERSION>
+│       ├── kernel.yml           kernel/ changed -> build .deb, boot-test; on main -> release kernel-v<VERSION> if the Image is new
 │       └── release.yml          tag v* -> release image with the published kernel -> boot-test -> release
 ├── build-kernel.sh              kernel package only, in Docker (what kernel.yml runs)
 ├── build-dev.sh / build-release.sh  one-line wrappers: scripts/build-image.sh <variant>
@@ -49,10 +49,11 @@ This is a demo project. Both images ship a fixed user/password and SSH enabled; 
 │   └── qemu-smoke-test.sh       boots an image headless, checks nginx and uname -r
 ├── Dockerfile                   Debian Bookworm + pi-gen deps + kernel build/packaging toolchain
 ├── config/
-│   ├── common.conf              everything shared: user, locale, STAGE_LIST, KERNEL_* knobs
+│   ├── common.conf              everything shared: user, locale, STAGE_LIST; sources kernel/kernel.conf
 │   ├── dev.conf                 IMG_NAME=pi4-demo-dev, zip, RELEASE_SLIM=0, KERNEL_SOURCE=build
 │   └── release.conf             IMG_NAME=pi4-demo, xz,  RELEASE_SLIM=1, KERNEL_SOURCE=deb
-├── kernel/
+├── kernel/                      every kernel input, so kernel.yml triggers on this directory
+│   ├── kernel.conf              KERNEL_* knobs: source URL/branch/COMMIT, defconfig, tree location
 │   ├── VERSION                  package version: <upstream>-demo.<N>, e.g. 6.12.110-demo.1
 │   ├── demo.config              Kconfig fragment (LOCALVERSION, /proc/config.gz, virtio)
 │   └── build-kernel.sh          clone at KERNEL_COMMIT -> config -> make bindeb-pkg -> .deb + Image
@@ -120,12 +121,15 @@ curl -s http://localhost/sysinfo.json
 Two workflows, both on GitHub's arm64 runner.
 
 **Kernel** (`.github/workflows/kernel.yml`). Any pull request that touches `kernel/`,
-`config/common.conf`, the Dockerfile or the kernel scripts builds the package, boots it
-in QEMU against the rootfs of the newest image release, and uploads it as a workflow
-artifact. When such a change is merged to `main`, the same build is published as
-release `kernel-v<kernel/VERSION>` with the tag created by the workflow. If that
-version is already released, the run fails: bump `kernel/VERSION` in the PR that changes
-the kernel. About 25 minutes.
+the Dockerfile or the kernel scripts builds the package, boots it in QEMU against the
+rootfs of the newest image release, and uploads it as a workflow artifact. When such a
+change is merged to `main`, the workflow decides by the reproducible kernel `Image`
+whether there is anything to publish: release `kernel-v<kernel/VERSION>` missing, create
+it (tag included); release present with the identical `Image` hash, nothing changed,
+skip; release present with a different hash, fail with "bump `kernel/VERSION`". So a
+toolchain or workflow edit that leaves the kernel byte-identical costs nothing, and a
+fragment or `KERNEL_COMMIT` change cannot be published under an old version. About 25
+minutes.
 
 **Image** (`.github/workflows/release.yml`):
 
@@ -143,8 +147,8 @@ the Actions tab (workflow_dispatch) builds and uploads the same files as a workf
 artifact without creating a release. About 15 minutes.
 
 Procedure for a kernel change, end to end: edit `kernel/demo.config` and/or
-`KERNEL_COMMIT`, bump `kernel/VERSION`, open a PR, merge, wait for `kernel-v…` to appear,
-tag the image.
+`KERNEL_COMMIT` in `kernel/kernel.conf`, bump `kernel/VERSION`, open a PR, merge, wait
+for `kernel-v…` to appear, tag the image.
 
 ### Running without a board (QEMU)
 
@@ -235,7 +239,7 @@ one.
   fragment or `KERNEL_COMMIT` changes on the same upstream version. Debian compares
   versions numerically, so `demo.2` upgrades `demo.1` on a device with
   `apt install ./linux-image-….deb`; a commit hash would not order.
-* **Source revision.** `KERNEL_COMMIT` in `config/common.conf` pins the exact
+* **Source revision.** `KERNEL_COMMIT` in `kernel/kernel.conf` pins the exact
   `raspberrypi/linux` commit; nothing builds from a moving branch tip. To move: run
   `KERNEL_UPDATE=1 ./build-kernel.sh`, read the new hash and Linux version from
   `deploy/kernel-release.env`, pin the hash, bump `kernel/VERSION`. The hash is recorded
@@ -316,8 +320,9 @@ build.
 
 ## Configuration knobs
 
-Everything is in `config/` (bash, sourced by pi-gen). Upstream variables are documented
-in `pi-gen/README.md`. Our additions, all in `common.conf` unless noted:
+Image settings are in `config/` (bash, sourced by pi-gen), kernel settings in
+`kernel/kernel.conf` (sourced by `config/common.conf` and by `kernel/build-kernel.sh`).
+Upstream pi-gen variables are documented in `pi-gen/README.md`. Our additions:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -325,8 +330,8 @@ in `pi-gen/README.md`. Our additions, all in `common.conf` unless noted:
 | `DEPLOY_COMPRESSION` | `zip` / `xz` (variant file) | `none`, `zip`, `gz` or `xz` |
 | `RELEASE_SLIM` | `0` / `1` (variant file) | run stage-slim |
 | `KERNEL_SOURCE` | `build` / `deb` (variant file) | build the kernel package here, or download release `kernel-v<VERSION>` |
-| `KERNEL_DEB_REPO` | `VasylHerman/pi-gen-demo` | GitHub repository holding the kernel releases |
-| `KERNEL_GIT_URL` | `https://github.com/raspberrypi/linux.git` | kernel source |
+| `KERNEL_DEB_REPO` | `VasylHerman/pi-gen-demo` (`kernel.conf`) | GitHub repository holding the kernel releases |
+| `KERNEL_GIT_URL` | `https://github.com/raspberrypi/linux.git` (`kernel.conf`, as are all `KERNEL_*` below) | kernel source |
 | `KERNEL_BRANCH` | `rpi-6.12.y` | branch to shallow-clone |
 | `KERNEL_COMMIT` | `9c40c75f…` (6.12.110) | exact commit to build; empty = branch tip |
 | `KERNEL_DEFCONFIG` | `bcm2711_defconfig` | base config (Pi 4 family, 64-bit) |

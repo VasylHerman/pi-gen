@@ -6,9 +6,8 @@
 # Follows https://www.raspberrypi.com/documentation/computers/linux_kernel.html, then
 # packages with the kernel's own `make bindeb-pkg`.
 #
-# Inputs (environment; config/common.conf sets the KERNEL_* ones):
-#   KERNEL_GIT_URL KERNEL_BRANCH KERNEL_COMMIT KERNEL_DEFCONFIG KERNEL_SRC_DIR
-#   KERNEL_UPDATE KERNEL_JOBS KERNEL_IMG_NAME
+# Inputs: kernel/kernel.conf (sourced here: source URL/branch/commit, defconfig, tree
+# location; KERNEL_UPDATE and KERNEL_JOBS may be overridden from the environment), plus
 #   KERNEL_FRAGMENT   Kconfig fragment            (default: kernel/demo.config)
 #   KERNEL_VERSION    Debian package version      (default: contents of kernel/VERSION)
 #   OUT_DIR           where to put the results    (required)
@@ -24,18 +23,11 @@
 # The upstream part must match the source tree (checked below); N is bumped whenever the
 # fragment changes without the source moving. `uname -r` stays "<upstream>-v8-demo".
 
-KERNEL_GIT_URL=${KERNEL_GIT_URL:-https://github.com/raspberrypi/linux.git}
-KERNEL_BRANCH=${KERNEL_BRANCH:-rpi-6.12.y}
-KERNEL_COMMIT=${KERNEL_COMMIT:-}
-KERNEL_DEFCONFIG=${KERNEL_DEFCONFIG:-bcm2711_defconfig}
-KERNEL_IMG_NAME=${KERNEL_IMG_NAME:-kernel8-demo.img}
-KERNEL_UPDATE=${KERNEL_UPDATE:-0}
-KERNEL_JOBS=${KERNEL_JOBS:-$(nproc)}
-
 KERNEL_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=kernel/kernel.conf
+. "${KERNEL_DIR}/kernel.conf"
 KERNEL_FRAGMENT=${KERNEL_FRAGMENT:-${KERNEL_DIR}/demo.config}
 KERNEL_VERSION=${KERNEL_VERSION:-$(tr -d '[:space:]' < "${KERNEL_DIR}/VERSION")}
-KERNEL_SRC_DIR=${KERNEL_SRC_DIR:-${KERNEL_DIR}/../work/kernel/linux}
 : "${OUT_DIR:?OUT_DIR must be set}"
 
 # pi-gen exports log(); provide the same shape when running standalone.
