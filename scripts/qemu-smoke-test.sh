@@ -19,8 +19,12 @@ LOG=$(mktemp -t qemu-smoke.XXXXXX)
 PIDFILE="${LOG}.pid"
 trap 'if [ -f "${PIDFILE}" ]; then kill "$(cat "${PIDFILE}")" 2>/dev/null || true; fi; rm -f "${LOG}" "${PIDFILE}"' EXIT
 
+# Decompress by streaming into a new file: `xz -dk` would try to copy owner and group
+# from the archive, which fails (exit 2) when deploy/ files were written by the build
+# container as root and this runs as another user, as on a CI runner.
 case "${IMAGE}" in
-	*.xz) xz -dkf "${IMAGE}"; IMAGE=${IMAGE%.xz} ;;
+	*.xz) xz -dc "${IMAGE}" > "${IMAGE%.xz}"; IMAGE=${IMAGE%.xz} ;;
+	*.gz) gzip -dc "${IMAGE}" > "${IMAGE%.gz}"; IMAGE=${IMAGE%.gz} ;;
 	*.zip) unzip -o -q "${IMAGE}" '*.img' -d "$(dirname "${IMAGE}")"; IMAGE=$(ls -t "$(dirname "${IMAGE}")"/*.img | head -n1) ;;
 esac
 

@@ -4,7 +4,8 @@
 # Runs on the build host (the Docker build container), not inside the chroot. Two ways
 # to obtain the package, selected by KERNEL_SOURCE (config/<variant>.conf):
 #   deb     download the release "kernel-v<kernel/VERSION>" of KERNEL_DEB_REPO on GitHub,
-#           published by .github/workflows/kernel.yml, and verify its SHA256SUMS
+#           published by .github/workflows/kernel.yml, and verify its SHA256SUMS;
+#           with GITHUB_TOKEN set the download goes through the API (private repos)
 #   build   run kernel/build-kernel.sh here (developer loop: edit the fragment, rebuild)
 # Both land in the same directory layout, and everything after that is identical, so
 # dev and release images are provisioned the same way.
@@ -39,22 +40,52 @@ CONFIG_TXT="${FIRMWARE_DIR}/config.txt"
 case "${KERNEL_SOURCE}" in
 	deb)
 		RELEASE_TAG="kernel-v${KERNEL_VERSION}"
-		BASE_URL="https://github.com/${KERNEL_DEB_REPO}/releases/download/${RELEASE_TAG}"
 		if [ -f "${PKG_DIR}/SHA256SUMS" ] && (cd "${PKG_DIR}" && sha256sum --quiet -c SHA256SUMS >/dev/null 2>&1); then
 			log "Using cached kernel package ${RELEASE_TAG} from ${PKG_DIR}"
 		else
-			log "Downloading kernel package ${RELEASE_TAG} from ${KERNEL_DEB_REPO}"
+			# Two download paths. Without a token, the public release URL. With GITHUB_TOKEN
+			# (a private repository, or CI's github.token), the REST API: assets of private
+			# releases are only served through /releases/assets/<id> with an Authorization
+			# header. The engine forwards GITHUB_TOKEN into the container; locally,
+			# `export GITHUB_TOKEN=$(gh auth token)` is enough.
+			ASSET_JSON="${PKG_DIR}/.release.json"
+			fetch_asset() {   # fetch_asset <name> <destination>
+				if [ -n "${GITHUB_TOKEN:-}" ]; then
+					local id
+					id=$(python3 -c 'import json,sys
+for a in json.load(open(sys.argv[1]))["assets"]:
+    if a["name"] == sys.argv[2]:
+        print(a["id"]); break' "${ASSET_JSON}" "$1")
+					[ -n "${id}" ] || { echo "ERROR: release ${RELEASE_TAG} has no asset $1" >&2; return 1; }
+					curl -fsSL --retry 3 \
+						-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/octet-stream" \
+						-o "$2" "https://api.github.com/repos/${KERNEL_DEB_REPO}/releases/assets/${id}"
+				else
+					curl -fsSL --retry 3 -o "$2" \
+						"https://github.com/${KERNEL_DEB_REPO}/releases/download/${RELEASE_TAG}/$1"
+				fi
+			}
 			rm -rf "${PKG_DIR}"
 			mkdir -p "${PKG_DIR}"
-			if ! curl -fsSL --retry 3 -o "${PKG_DIR}/SHA256SUMS" "${BASE_URL}/SHA256SUMS"; then
-				echo "ERROR: no GitHub release ${RELEASE_TAG} in ${KERNEL_DEB_REPO}." >&2
-				echo "       Merge the kernel change so .github/workflows/kernel.yml publishes it," >&2
-				echo "       or build locally with KERNEL_SOURCE=build." >&2
+			if [ -n "${GITHUB_TOKEN:-}" ]; then
+				log "Downloading kernel package ${RELEASE_TAG} from ${KERNEL_DEB_REPO} (authenticated, GitHub API)"
+				curl -fsSL --retry 3 \
+					-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" \
+					-o "${ASSET_JSON}" "https://api.github.com/repos/${KERNEL_DEB_REPO}/releases/tags/${RELEASE_TAG}" || true
+			else
+				log "Downloading kernel package ${RELEASE_TAG} from ${KERNEL_DEB_REPO} (public release URL)"
+			fi
+			if ! fetch_asset SHA256SUMS "${PKG_DIR}/SHA256SUMS" 2>/dev/null; then
+				echo "ERROR: cannot fetch GitHub release ${RELEASE_TAG} from ${KERNEL_DEB_REPO}." >&2
+				echo "       - not published yet? merge the kernel change so .github/workflows/kernel.yml publishes it" >&2
+				echo "       - private repository? set GITHUB_TOKEN (e.g. export GITHUB_TOKEN=\$(gh auth token))" >&2
+				echo "       - or build locally with KERNEL_SOURCE=build" >&2
 				exit 1
 			fi
 			awk '{print $2}' "${PKG_DIR}/SHA256SUMS" | while read -r f; do
-				curl -fsSL --retry 3 -o "${PKG_DIR}/${f}" "${BASE_URL}/${f}"
+				fetch_asset "${f}" "${PKG_DIR}/${f}"
 			done
+			rm -f "${ASSET_JSON}"
 			(cd "${PKG_DIR}" && sha256sum --quiet -c SHA256SUMS)
 		fi
 		;;

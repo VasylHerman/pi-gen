@@ -36,10 +36,14 @@ fi
 newest() {
 	ls -t "$@" 2>/dev/null | head -n1 || true
 }
+# Disk images only: the kernel Image in deploy/ is also a *.img file.
+newest_disk_image() {
+	ls -t "${DEPLOY}"/*.img 2>/dev/null | grep -v -F -- "/$(basename "${KERNEL}")" | head -n1 || true
+}
 
 IMG=${1:-}
 if [ -z "${IMG}" ]; then
-	IMG=$(newest "${DEPLOY}"/*.img)
+	IMG=$(newest_disk_image)
 fi
 if [ -z "${IMG}" ]; then
 	ARCHIVE=$(newest "${DEPLOY}"/*.zip "${DEPLOY}"/*.img.xz "${DEPLOY}"/*.img.gz)
@@ -48,12 +52,14 @@ if [ -z "${IMG}" ]; then
 		exit 1
 	fi
 	echo "==> Extracting ${ARCHIVE}"
+	# Stream into a new file rather than `xz -dk`: deploy/ files are written by the build
+	# container as root, and copying their owner/group fails for a normal user on Linux.
 	case "${ARCHIVE}" in
 		*.zip) unzip -o -q "${ARCHIVE}" '*.img' -d "${DEPLOY}" ;;
-		*.xz) xz -dk "${ARCHIVE}" ;;
-		*.gz) gunzip -k "${ARCHIVE}" ;;
+		*.xz) xz -dc "${ARCHIVE}" > "${ARCHIVE%.xz}" ;;
+		*.gz) gzip -dc "${ARCHIVE}" > "${ARCHIVE%.gz}" ;;
 	esac
-	IMG=$(newest "${DEPLOY}"/*.img)
+	IMG=$(newest_disk_image)
 fi
 if [ ! -f "${KERNEL}" ]; then
 	echo "Kernel ${KERNEL} not found; stage-kernel copies it into deploy/ during a build" >&2
