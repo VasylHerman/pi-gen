@@ -65,8 +65,11 @@ jobs:
         run: |
           set -eu
           cd deploy
-          rm -f -- *.img
-          # The raw .img would exceed the 2 GB release-asset limit; ship the compressed image.
+          # Drop the raw disk image the boot test extracted (it would exceed the 2 GB
+          # release-asset limit; the compressed one is shipped). Not `*.img`: that would
+          # also match kernel8-demo.img.
+          rm -f -- image_*.img
+          ls kernel8-demo.img >/dev/null
           ls -la
           . ./kernel-release.env
           sha256sum -- image_* kernel8-demo.img *.info > SHA256SUMS
