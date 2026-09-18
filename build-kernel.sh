@@ -12,6 +12,8 @@
 # Environment:
 #   KERNEL_UPDATE=1       re-fetch KERNEL_BRANCH and build its tip instead of KERNEL_COMMIT
 #   KERNEL_JOBS           make parallelism (default: nproc)
+#   CCACHE_DIR            host directory for the compiler cache (default: inside the work
+#                         volume); CI persists it between runs with actions/cache
 #   CONTAINER_NAME        default: pigen_kernel;  WORK_VOLUME default: ${CONTAINER_NAME}_work
 #   DOCKER_PLATFORM, DOCKER, IMAGE_TAG   see scripts/docker-env.sh
 set -eu
@@ -42,6 +44,7 @@ env_assert_not_running "${CONTAINER_NAME}"
 mkdir -p "${ROOT}/deploy"
 env_build_image
 
+# shellcheck disable=SC2046
 run_container() {
 	# Same mount points as an image build, so KERNEL_SRC_DIR from kernel/kernel.conf
 	# (${BASE_DIR}/work/kernel/linux) resolves identically.
@@ -51,6 +54,7 @@ run_container() {
 		--volume "${ROOT}/deploy:/build/pi-gen/deploy" \
 		-e "KERNEL_UPDATE=${KERNEL_UPDATE:-}" \
 		-e "KERNEL_JOBS=${KERNEL_JOBS:-}" \
+		$(env_ccache_opts) \
 		"$@"
 }
 

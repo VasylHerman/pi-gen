@@ -53,7 +53,22 @@ jobs:
 
       - uses: ./.github/actions/prepare-runner
 
+      - name: Restore compiler cache
+        # ccache turns the ~22 min from-scratch compile into a few minutes when only the
+        # fragment or the packaging changed. Entries are immutable, so every run saves
+        # under a new key and the next run restores the most recent one for the same
+        # kernel inputs (falling back to any arm64 cache).
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-kernel-${{ runner.arch }}-${{ hashFiles('kernel/**', 'Dockerfile') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-kernel-${{ runner.arch }}-${{ hashFiles('kernel/**', 'Dockerfile') }}-
+            ccache-kernel-${{ runner.arch }}-
+
       - name: Build kernel package
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/ccache
         run: ./build-kernel.sh
 
       - name: Read result

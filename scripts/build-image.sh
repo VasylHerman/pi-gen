@@ -18,6 +18,8 @@
 #                         passed through to pi-gen; the config falls back to its defaults
 #   GITHUB_TOKEN          forwarded for KERNEL_SOURCE=deb downloads from a private
 #                         repository; defaults to `gh auth token` when gh is logged in
+#   CCACHE_DIR            host directory for the kernel compiler cache (KERNEL_SOURCE=build);
+#                         default: inside the work volume
 #   DOCKER_PLATFORM, DOCKER, IMAGE_TAG   see scripts/docker-env.sh
 #   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
 #
@@ -74,7 +76,7 @@ fi
 
 env_build_image
 
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086,SC2046
 run_container() {
 	env_run \
 		--name "${CONTAINER_NAME}" \
@@ -88,6 +90,7 @@ run_container() {
 		-e "KERNEL_UPDATE=${KERNEL_UPDATE:-}" \
 		-e "GITHUB_TOKEN=${GITHUB_TOKEN:-}" \
 		-e "PIGEN_CONFIG=${CONFIG_IN_CONTAINER}" \
+		$(env_ccache_opts) \
 		${PIGEN_DOCKER_OPTS} \
 		"$@"
 }
