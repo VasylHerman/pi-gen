@@ -5,8 +5,10 @@
 # scripts must be exported: pi-gen runs each *-run.sh as a child process.
 # Reference for the upstream variables: pi-gen/README.md, section "Config".
 
-IMG_NAME="pi4-demo"
-PI_GEN_RELEASE="Raspberry Pi 4 custom kernel demo"
+# Both may be overridden from the environment (./build.sh passes them through); the
+# release workflow sets IMG_NAME to pi4-demo-<tag>.
+IMG_NAME="${IMG_NAME:-pi4-demo}"
+PI_GEN_RELEASE="${PI_GEN_RELEASE:-Raspberry Pi 4 custom kernel demo}"
 RELEASE="bookworm"
 
 TARGET_HOSTNAME="pi-demo"        # reachable as http://pi-demo.local/ via avahi

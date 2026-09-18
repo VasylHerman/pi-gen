@@ -17,6 +17,7 @@ This is a demo project. The image ships a fixed user/password and SSH enabled; s
 
 ```
 .
+├── .github/workflows/release.yml  tag push -> build on arm64 runner -> GitHub release
 ├── build.sh                 Docker wrapper: builds the environment, runs pi-gen, collects deploy/
 ├── Dockerfile               Debian Bookworm + pi-gen deps + kernel toolchain
 ├── config                   pi-gen config (image name, user, STAGE_LIST, KERNEL_* knobs)
@@ -76,6 +77,23 @@ grep kernel= /boot/firmware/config.txt
 cat /etc/demo-kernel          # release, branch, commit, build date
 curl -s http://localhost/sysinfo.json
 ```
+
+### Releases from CI
+
+`.github/workflows/release.yml` builds the image on GitHub's arm64 runner and publishes
+a release whenever a version tag is pushed:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The release carries `image_<date>-pi4-demo-v1.0.0.zip`, `kernel8-demo.img` (for
+`run-qemu.sh`), the `.info` package list, `build.log` and `SHA256SUMS`. The tag is baked
+into the image name, `/etc/rpi-issue` and the demo page via `IMG_NAME` and
+`PI_GEN_RELEASE`, which `config` accepts from the environment. A manual run from the
+Actions tab (workflow_dispatch) builds and uploads the same files as a workflow artifact
+without creating a release. Expect 30 to 45 minutes on the 4-vCPU runner.
 
 ### Running without a board (QEMU)
 
@@ -173,8 +191,9 @@ in `pi-gen/README.md`. Our additions:
 | `KERNEL_UPDATE` | `0` | `1` re-fetches the branch tip on each build |
 | `KERNEL_JOBS` | `nproc` | make parallelism |
 
-Wrapper (`build.sh`) environment: `CLEAN=1`, `CONTAINER_NAME`, `WORK_VOLUME`,
-`PIGEN_DOCKER_OPTS`, `DOCKER`.
+Wrapper (`build.sh`) environment: `CLEAN=1`, `CONTAINER_NAME`, `WORK_VOLUME` (volume
+name or host path), `IMG_NAME`, `PI_GEN_RELEASE`, `DOCKER_PLATFORM`, `PIGEN_DOCKER_OPTS`,
+`DOCKER`.
 
 ## Building without Docker
 

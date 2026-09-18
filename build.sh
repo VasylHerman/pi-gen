@@ -8,7 +8,9 @@
 # Environment:
 #   CLEAN=1               pi-gen: rebuild the rootfs of every stage that has no SKIP file
 #   CONTAINER_NAME        default: pigen_demo
-#   WORK_VOLUME           default: ${CONTAINER_NAME}_work (persists between runs)
+#   WORK_VOLUME           default: ${CONTAINER_NAME}_work (persists between runs); a Docker
+#                         volume name, or an absolute host path (used by CI to pick a disk)
+#   IMG_NAME, PI_GEN_RELEASE  passed through to pi-gen; config falls back to its defaults
 #   PIGEN_DOCKER_OPTS     extra arguments for `docker run`
 #   DOCKER_PLATFORM       default: the Docker server's native platform (linux/arm64 on
 #                         Apple Silicon). Set explicitly to override. This wins over a
@@ -60,6 +62,9 @@ fi
 
 case "${CMD}" in
 	reset)
+		case "${WORK_VOLUME}" in
+			/*) echo "WORK_VOLUME is a host path; remove it yourself: sudo rm -rf ${WORK_VOLUME}" >&2; exit 1 ;;
+		esac
 		${DOCKER} volume rm -f "${WORK_VOLUME}" >/dev/null
 		echo "Removed work volume ${WORK_VOLUME}"
 		exit 0
@@ -97,6 +102,8 @@ run_container() {
 		--volume "${DIR}/deploy:/build/pi-gen/deploy" \
 		-e "GIT_HASH=${GIT_HASH}" \
 		-e "CLEAN=${CLEAN:-}" \
+		-e "IMG_NAME=${IMG_NAME:-}" \
+		-e "PI_GEN_RELEASE=${PI_GEN_RELEASE:-}" \
 		${PIGEN_DOCKER_OPTS} \
 		"$@"
 }
