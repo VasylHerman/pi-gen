@@ -16,6 +16,9 @@
 #   SNAPSHOT=0    write changes back to the .img (default: discard, image stays pristine)
 #   MEM=2G SMP=4  guest size
 #   KERNEL=...    kernel Image (default deploy/kernel8-demo.img)
+#   HEADLESS=1    no console on this terminal: serial goes to SERIAL_LOG (default
+#                 deploy/qemu-serial.log), the PID to PIDFILE; used by scripts/qemu-smoke-test.sh
+#   ACCEL=...     override the accelerator choice, e.g. "-accel tcg -cpu cortex-a72"
 set -eu
 
 DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -57,18 +60,28 @@ if [ ! -f "${KERNEL}" ]; then
 	exit 1
 fi
 
-# Hardware acceleration when the host CPU matches the guest (Apple Silicon: HVF).
-ACCEL="-accel tcg -cpu cortex-a72"
-case "$(uname -s)-$(uname -m)" in
-	Darwin-arm64) ACCEL="-accel hvf -cpu host" ;;
-	Linux-aarch64) [ -w /dev/kvm ] && ACCEL="-accel kvm -cpu host" ;;
-esac
+# Hardware acceleration when the host CPU matches the guest (Apple Silicon: HVF,
+# Linux arm64 with /dev/kvm: KVM), otherwise TCG emulation.
+if [ -z "${ACCEL:-}" ]; then
+	ACCEL="-accel tcg -cpu cortex-a72"
+	case "$(uname -s)-$(uname -m)" in
+		Darwin-arm64) ACCEL="-accel hvf -cpu host" ;;
+		Linux-aarch64) [ -w /dev/kvm ] && ACCEL="-accel kvm -cpu host" ;;
+	esac
+fi
 
 EXTRA=""
 [ "${SNAPSHOT}" = "1" ] && EXTRA="-snapshot"
-
-echo "==> Booting ${IMG} with ${KERNEL} (${ACCEL#-accel }; snapshot=${SNAPSHOT})"
-echo "    http://localhost:8080   ssh -p 2222 pi@localhost   quit: Ctrl-a x"
+if [ "${HEADLESS:-0}" = "1" ]; then
+	SERIAL_LOG=${SERIAL_LOG:-${DEPLOY}/qemu-serial.log}
+	PIDFILE=${PIDFILE:-${DEPLOY}/qemu.pid}
+	EXTRA="${EXTRA} -display none -monitor none -serial file:${SERIAL_LOG} -pidfile ${PIDFILE}"
+	echo "==> Booting ${IMG} headless with ${KERNEL} (${ACCEL#-accel }); serial: ${SERIAL_LOG}, pid: ${PIDFILE}"
+else
+	EXTRA="${EXTRA} -nographic"
+	echo "==> Booting ${IMG} with ${KERNEL} (${ACCEL#-accel }; snapshot=${SNAPSHOT})"
+	echo "    http://localhost:8080   ssh -p 2222 pi@localhost   quit: Ctrl-a x"
+fi
 # shellcheck disable=SC2086
 exec qemu-system-aarch64 \
 	-M virt -m "${MEM}" -smp "${SMP}" ${ACCEL} \
@@ -79,4 +92,4 @@ exec qemu-system-aarch64 \
 	-netdev user,id=net0,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22 \
 	-device virtio-net-pci,netdev=net0 \
 	-device virtio-rng-pci \
-	-nographic ${EXTRA}
+	${EXTRA}

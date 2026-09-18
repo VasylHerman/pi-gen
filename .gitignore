@@ -7,3 +7,4 @@ work/
 *.img.xz
 .docker-build.log
 .claude/
+/*.log
