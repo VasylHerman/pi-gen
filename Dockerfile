@@ -2,7 +2,8 @@
 #
 # Contains everything pi-gen needs (debootstrap, loop devices, chroot tooling —
 # see pi-gen/depends and pi-gen/Dockerfile) plus the kernel build toolchain used
-# by stage-kernel. Built and run by ./build.sh; not meant to be used directly.
+# by stage-kernel. Built and run by scripts/build-image.sh (via ./build-dev.sh and
+# ./build-release.sh); not meant to be used directly.
 #
 # On an arm64 host (Apple Silicon, Pi, Graviton) the arm64 chroot runs natively and
 # the kernel is built with the native gcc (Debian still provides the
@@ -10,8 +11,8 @@
 # chroot and crossbuild-essential-arm64 provides the cross compiler.
 # qemu-user-static is installed on every host because pi-gen/depends lists
 # qemu-arm-static unconditionally and its dependency check would fail without it.
-# build.sh passes --platform explicitly; the FROM image must match the Docker server's
-# native architecture or the whole build runs under emulation.
+# scripts/build-image.sh passes --platform explicitly; the FROM image must match the
+# Docker server's native architecture or the whole build runs under emulation.
 ARG BASE_IMAGE=debian:bookworm
 FROM ${BASE_IMAGE}
 
@@ -30,7 +31,7 @@ RUN apt-get -y update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Repo layout is preserved: /build/pi-gen is the upstream submodule, /build/stage-*
-# are our stages, /build/config is the pi-gen config.
+# are our stages, /build/config/<variant>.conf the pi-gen configs.
 COPY . /build/
 
 # Only export the final image (stage-web has EXPORT_IMAGE); skip the intermediate

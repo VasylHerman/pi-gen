@@ -1,0 +1,22 @@
+# Packages the release image must keep. stage-slim marks these as manually installed
+# before purging, so `apt-get autoremove` never takes them, and fails the build if any
+# of them is missing afterwards. One or more per line; comments allowed.
+
+# boot: firmware blobs, kernel/initramfs hooks (export-image runs update-initramfs),
+# Raspberry Pi system integration
+raspi-firmware initramfs-tools linux-base
+raspberrypi-sys-mods raspi-config raspi-utils rpi-eeprom
+
+# base system
+systemd systemd-sysv systemd-timesyncd udev dbus sudo
+openssh-server openssh-client ca-certificates fake-hwclock
+console-setup keyboard-configuration locales tzdata
+parted e2fsprogs dosfstools kmod libpam-chksshpwd
+
+# network, Wi-Fi (on-board BCM43455) and Bluetooth
+network-manager raspberrypi-net-mods wpasupplicant wireless-tools iw
+firmware-brcm80211 bluez pi-bluetooth
+avahi-daemon libnss-mdns netbase net-tools
+
+# the application and a minimal toolbox
+nginx-light curl less psmisc procps rsync

@@ -1,0 +1,30 @@
+# Packages removed from the release image (apt-get purge --auto-remove). Globs are
+# dpkg patterns. Anything not installed is skipped silently. Their auto-installed
+# dependencies (Qt, boost, libcamera, Perl modules, sanitizer runtimes, ...) go with them.
+
+# compilers and debugging (pi-gen stage2 installs build-essential for developers).
+# Not binutils: rpi-eeprom depends on it, and through raspi-utils and raspi-config so
+# does every Raspberry Pi integration package.
+build-essential gcc g++ cpp make dpkg-dev gcc-12 g++-12 cpp-12
+libc6-dev libstdc++-12-dev libgcc-12-dev linux-libc-dev
+gdb libc6-dbg strace manpages-dev pkg-config
+
+# stock Debian kernels and headers: the custom kernel is the only kernel
+linux-image-* linux-headers-* linux-kbuild-*
+
+# Wi-Fi firmware for chips the Pi 4 does not have (on-board is firmware-brcm80211)
+firmware-atheros firmware-libertas firmware-realtek firmware-mediatek
+
+# camera, media, GPIO and hardware tooling. Not kms++-utils: raspinfo (a dependency of
+# raspi-utils, hence raspi-config and raspberrypi-sys-mods) needs it.
+rpicam-apps-lite mkvtoolnix v4l-utils
+gpiod python3-libgpiod python3-gpiozero pigpio python3-pigpio raspi-gpio
+python3-rpi-lgpio python3-spidev python3-smbus2 python-is-python3 python3-venv
+luajit rpi-keyboard-config rpi-keyboard-fw-update
+
+# filesystems, mobile broadband, storage automounting, misc network
+cifs-utils nfs-common rpcbind ntfs-3g usb-modeswitch libmtp-runtime udisks2
+modemmanager rpi-update ssh-import-id apt-listchanges pastebinit
+
+# convenience tools and docs
+htop ncdu ed fbset p7zip-full zip unzip man-db manpages dphys-swapfile
